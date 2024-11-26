@@ -1,0 +1,3 @@
+[submodule "generals-bots"]
+	path = generals-bots
+	url = https://github.com/strakam/generals-bots
