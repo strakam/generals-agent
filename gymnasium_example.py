@@ -1,6 +1,7 @@
 import gymnasium as gym
 
-from generals.agents import RandomAgent, ExpanderAgent
+from generals.agents import ExpanderAgent
+from random_agent import RandomAgent
 
 # Initialize agents
 agent = RandomAgent()
