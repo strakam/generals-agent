@@ -76,13 +76,13 @@ def fetch_replays(username: str = None):
     filters = [
         partial(filter_by_n_players, n_players=2),
         # partial(filter_by_turns, min_turns=0, max_turns=1e5),
-        partial(filter_by_elo_player, min_stars=65, max_stars=1e5),
+        # partial(filter_by_elo_game, min_stars=65, max_stars=1e5),
     ]
 
     if username:
-        url = f"https://generals.io/api/replaysForUsername?&u={username}&"
+        url = f"https://generals.io/api/replaysForUsername?&l=duel&u={username}&"
     else:
-        url = "https://generals.io/api/replays?"
+        url = "https://generals.io/api/replays?&l=duel&"
 
     urls = [f"{url}offset={offset}&count=200" for offset in offsets]
 
@@ -103,7 +103,7 @@ def fetch_replays(username: str = None):
             except Exception as e:
                 print(f"Error processing a future: {e}")
 
-    with open("high_elo_player_replay_ids.txt", "w") as f:
+    with open("replay_ids/all_duels.txt", "w") as f:
         f.write("\n".join(replay_ids))
         f.write("\n")
 
