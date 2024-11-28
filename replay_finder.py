@@ -105,6 +105,7 @@ def fetch_replays(username: str = None):
 
     with open("high_elo_player_replay_ids.txt", "w") as f:
         f.write("\n".join(replay_ids))
+        f.write("\n")
 
 # Run the scraper
 if __name__ == "__main__":
