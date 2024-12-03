@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+supervised/all_replays/
 
 # C extensions
 *.so
