@@ -26,6 +26,7 @@ class ReplayAgent(Agent):
 
         if time not in self.replay_moves:
             return [1, 0, 0, 0, 0]
+
         return self.replay_moves[time]
 
     def reset(self):

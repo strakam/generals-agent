@@ -30,7 +30,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         replay_files: list[str],
         grid_factory: GridFactory | None = None,
     ):
-        self.render_mode = "human"
+        self.render_mode = None
         self.grid_factory = grid_factory if grid_factory is not None else GridFactory()
 
         # Agents
@@ -62,7 +62,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
     def next_replay(self):
         game = json.load(open(self.replay_files[self.replay_idx]))
-        print(self.replay_files[self.replay_idx])
         width = game["mapWidth"]
         height = game["mapHeight"]
 
@@ -101,12 +100,14 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         ]
 
         # Pad the game with '#' to make it 24x24
-        pad = 24 - width
-        map = [[*row, *["#" for _ in range(pad)]] for row in map]
-        map.extend([["#" for _ in range(24)] for _ in range(pad)])
+        pad_width = 24 - width
+        pad_height = 24 - height
+        map = [[*row, *["#" for _ in range(pad_width)]] for row in map]
+        map.extend([["#" for _ in range(24)] for _ in range(pad_height)])
 
         map_str = "\n".join(["".join(row) for row in map])
-        print(map_str)
+        self.replay_idx += 1
+        self.replay_idx %= len(self.replay_files)
         return map_str, player_moves
 
     def reset(
@@ -117,7 +118,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         self.agents = deepcopy(self.possible_agents)
 
         grid_string, player_moves = self.next_replay()
-        self.replay_idx += 1
 
         self.game_length = max(len(player_moves[0].keys()), len(player_moves[1].keys()))
         grid = self.grid_factory.grid_from_string(grid_string)
@@ -160,6 +160,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         terminate = any(terminated.values())
         if terminate:
             self.agents = []
+        self.time += 1
         return observations, rewards, terminated, truncated, infos
 
     def close(self) -> None:
