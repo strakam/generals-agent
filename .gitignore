@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 supervised/all_replays/
+data_scraping/
+replays/
 
 # C extensions
 *.so

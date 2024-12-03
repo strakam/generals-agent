@@ -29,8 +29,9 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         agents: dict[AgentID, Agent],
         replay_files: list[str],
         grid_factory: GridFactory | None = None,
+        render_mode: str | None = None,
     ):
-        self.render_mode = None
+        self.render_mode = render_mode
         self.grid_factory = grid_factory if grid_factory is not None else GridFactory()
 
         # Agents
@@ -62,6 +63,8 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
     def next_replay(self):
         game = json.load(open(self.replay_files[self.replay_idx]))
+        # print(f"Loaded: {self.replay_files[self.replay_idx]}")
+        self.game_length = 1e4 if game["afks"] == [] else game["afks"][0][1]
         width = game["mapWidth"]
         height = game["mapHeight"]
 
@@ -119,7 +122,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
         grid_string, player_moves = self.next_replay()
 
-        self.game_length = max(len(player_moves[0].keys()), len(player_moves[1].keys()))
         grid = self.grid_factory.grid_from_string(grid_string)
 
         self.game = Game(grid, self.agents)

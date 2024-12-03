@@ -22,9 +22,10 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             a, b = self.agent_A.id, self.agent_B.id
             actions = {a: self.agent_A.act(obs[a]), b: self.agent_B.act(obs[b])}
 
-            yield obs
+            yield (1,1)
             obs, _, terminated, truncated, _ = self.env.step(actions)
 
+            self.env.render()
             if all(terminated.values()) or all(truncated.values()):
                 obs, info = self.env.reset()
                 self.agent_A.give_actions(info[0])
@@ -34,40 +35,36 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 def per_worker_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset  # the dataset copy in this worker process
+
     length = len(dataset.replay_files)
-    # configure the dataset to only process the split workload
     per_worker = int(math.ceil((length / float(worker_info.num_workers))))
-    # For every worker, allocate his chunk
+
     worker_id = worker_info.id
-    dataset.start = worker_id * per_worker
-    dataset.end = min(dataset.start + per_worker, length)
+    start = worker_id * per_worker
+    end = min(start + per_worker, length)
+
     dataset.env = PettingZooGenerals(
         agents={
             dataset.agent_A.id: dataset.agent_A,
             dataset.agent_B.id: dataset.agent_B,
         },
         replay_files=[
-            name for name in dataset.replay_files[dataset.start : dataset.end]
+            name for name in dataset.replay_files[start : end]
         ],
+        render_mode=None
     )
-
-def collate_fn(batch):
-    return batch
-
-dataloader = torch.utils.data.DataLoader(
-    ReplayDataset(
+#
+dataloader = torch.utils.data.DataLoader( ReplayDataset(
         [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[:400]]
     ),
     batch_size=20,
-    num_workers=10,
+    num_workers=1,
     worker_init_fn=per_worker_init_fn,
-    collate_fn=collate_fn
+    collate_fn=lambda x: x,
 )
-
 c = 0
 for o in dataloader:
-    c+=len(o)
-    print(c)
+    c += 1
 
 # dataloader = torch.utils.data.DataLoader(
 #     ReplayDataset(
