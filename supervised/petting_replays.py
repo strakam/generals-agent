@@ -2,6 +2,7 @@ import functools
 from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeAlias
+import numpy as np
 import json
 
 import pettingzoo  # type: ignore
@@ -28,6 +29,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         self,
         agents: dict[AgentID, Agent],
         replay_files: list[str],
+        history_size: int | None = 40,
         grid_factory: GridFactory | None = None,
         render_mode: str | None = None,
     ):
@@ -42,6 +44,8 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         # Replay stuff
         self.replay_files = replay_files
         self.replay_idx = 0
+
+        self.history_size = history_size
 
         assert len(self.possible_agents) == len(
             set(self.possible_agents)
@@ -133,7 +137,66 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         observations = {
             agent: self.game.agent_observation(agent).as_dict() for agent in self.agents
         }
+
+        self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
+        self.army_stack[0, 0, :, :] = observations[self.agents[0]]["observation"][
+            "armies"
+        ]
+        self.army_stack[1, 0, :, :] = observations[self.agents[1]]["observation"][
+            "armies"
+        ]
+
+        self.cities = [
+            np.array(observations[agent]["observation"]["cities"]).astype(bool)
+            for agent in self.agents
+        ]
+        self.generals = [
+            np.array(observations[agent]["observation"]["generals"]).astype(bool)
+            for agent in self.agents
+        ]
+        self.mountains = [
+            np.array(observations[agent]["observation"]["mountains"]).astype(bool)
+            for agent in self.agents
+        ]
+        observations = self.prepare_observations(observations)
         return observations, player_moves
+
+    def prepare_observations(self, observations):
+        # 40 (history) + 15 classic
+        # update history stack
+        for i, agent in enumerate(self.agents):
+            self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
+            self.army_stack[i, 0, :, :] = (
+                observations[agent]["observation"]["armies"]
+                - self.army_stack[i, 1, :, :]
+            )
+            self.cities[i] |= observations[agent]["observation"]["cities"]
+            self.generals[i] |= observations[agent]["observation"]["generals"]
+            self.mountains[i] |= observations[agent]["observation"]["mountains"]
+
+        return {
+            agent: np.stack(
+                [
+                    observations[agent]["observation"]["armies"],
+                    self.generals[i],
+                    self.cities[i],
+                    self.mountains[i],
+                    observations[agent]["observation"]["neutral_cells"],
+                    observations[agent]["observation"]["owned_cells"],
+                    observations[agent]["observation"]["opponent_cells"],
+                    observations[agent]["observation"]["fog_cells"],
+                    observations[agent]["observation"]["structures_in_fog"],
+                    observations[agent]["observation"]["owned_land_count"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["owned_army_count"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["opponent_land_count"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["opponent_army_count"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["timestep"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["priority"] * np.ones((24, 24)),
+                    *self.army_stack[i]
+                ]
+            )
+            for i, agent in enumerate(self.agents)
+        }
 
     def step(
         self, actions: dict[AgentID, Action]
@@ -148,6 +211,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         observations = {
             agent: observation.as_dict() for agent, observation in observations.items()
         }
+        observations = self.prepare_observations(observations)
         # You probably want to set your truncation based on self.game.time
         truncated = {
             agent: True if self.time > self.game_length else False

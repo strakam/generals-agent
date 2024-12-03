@@ -21,8 +21,7 @@ class ReplayAgent(Agent):
         """
         Randomly selects a valid action.
         """
-        observation = observation["observation"]
-        time = observation["timestep"]
+        time = observation[13][0][0] # timestep is 13th channel
 
         if time not in self.replay_moves:
             return [1, 0, 0, 0, 0]
