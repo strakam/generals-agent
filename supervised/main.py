@@ -14,5 +14,5 @@ dataloader = torch.utils.data.DataLoader(
 
 for i in dataloader:
     print(len(i))
-    print((i[0]['A'].shape))
+    print((i[0].shape))
     break
