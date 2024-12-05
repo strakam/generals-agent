@@ -14,17 +14,26 @@ class Pyramid(nn.Module):
         )
         # Encoder stages
         self.encoder_stages = nn.ModuleList()
+        print("HIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
         self.skip_connections = []
+
+        skip_channels = []
 
         for i in range(len(stage_blocks)):
             stage = nn.ModuleList()
             for j in range(stage_blocks[i]):
-                in_channels = stage_channels[i-1] if j == 0 and i > 0 else stage_channels[i]
+                in_channels = (
+                    stage_channels[i - 1] if j == 0 and i > 0 else stage_channels[i]
+                )
                 out_channels = stage_channels[i]
                 stage.append(ConvResBlock(in_channels, out_channels))
-            if i < len(stage_blocks) - 1: # Downsample
+                print(f"hir {in_channels}")
+                skip_channels.append(in_channels)
+            if i < len(stage_blocks) - 1:  # Downsample
                 channels = stage_channels[i]
                 stage.append(ConvResBlock(channels, channels, stride=2))
+                print(f"down {channels}")
+                skip_channels.append(channels)
             self.encoder_stages.append(stage)
 
         # Decoder stages
@@ -33,12 +42,20 @@ class Pyramid(nn.Module):
         for i in range(len(stage_blocks) - 1, -1, -1):
             stage = nn.ModuleList()
             for j in range(stage_blocks[i]):
-                in_channels = stage_channels[i+1] if j == 0 and i < len(stage_blocks) - 1 else stage_channels[i]
+                in_channels = (
+                    stage_channels[i + 1]
+                    if j == 0 and i < len(stage_blocks) - 1
+                    else stage_channels[i]
+                )
                 out_channels = stage_channels[i]
-                stage.append(DeconvResBlock(in_channels, out_channels))
-            if i > 0: # Upsample
+                stage.append(
+                    DeconvResBlock(in_channels, out_channels, skip_channels.pop())
+                )
+            if i > 0:  # Upsample
                 channels = stage_channels[i]
-                stage.append(DeconvResBlock(channels, channels, stride=2))
+                stage.append(
+                    DeconvResBlock(channels, channels, skip_channels.pop(), stride=2)
+                )
             self.decoder_stages.append(stage)
 
     def forward(self, x):
@@ -48,7 +65,6 @@ class Pyramid(nn.Module):
             for block in stage:
                 skip_out, x = block(x)
                 skip_connections.append(skip_out)
-        skip_connections.append(x)
 
         print("SKIPS")
         for skip in skip_connections:
@@ -59,12 +75,6 @@ class Pyramid(nn.Module):
                 skip_in = skip_connections.pop()
                 x = block(x, skip_in)
         return x
-
-
-
-
-
-
 
 
 class ConvResBlock(nn.Module):
@@ -85,43 +95,55 @@ class ConvResBlock(nn.Module):
 
 
 class DeconvResBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1):
+    def __init__(
+        self, in_channels: int, out_channels: int, skip_channels: int, stride: int = 1
+    ):
         super().__init__()
         self.stride = stride
 
         if stride == 2:
             self.conv1 = nn.Sequential(
                 nn.ConvTranspose2d(
-                    in_channels, out_channels // 2, 3, stride=stride, padding=1, output_padding=1
+                    in_channels,
+                    out_channels // 2,
+                    3,
+                    stride=stride,
+                    padding=1,
+                    output_padding=1,
                 ),
                 nn.ReLU(),
             )
-            self.residual_conv = nn.ConvTranspose2d(in_channels, out_channels, 1, stride=stride, output_padding=1)
-            self.skip_conv = nn.ConvTranspose2d(in_channels, out_channels//2, 1, stride=stride, output_padding=1)
+            self.residual_conv = nn.ConvTranspose2d(
+                in_channels, out_channels, 1, stride=stride, output_padding=1
+            )
         else:
             self.conv1 = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels // 2, 3, stride=stride, padding=1),
                 nn.ReLU(),
             )
             self.residual_conv = nn.Conv2d(in_channels, out_channels, 1, stride=stride)
-            self.skip_conv = nn.Conv2d(in_channels, out_channels//2, 1, stride=stride)
+        self.skip_conv = nn.Conv2d(
+            skip_channels,
+            out_channels // 2,
+            1,
+            stride=1,
+        )
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels // 2, out_channels, 3, padding=1),
             nn.ReLU(),
         )
 
-
     def forward(self, x, skip_in):
-        print(f"x {x.shape}, skip {skip_in.shape}, my stride {self.stride}")
+        print(f"x {x.shape}, skip-in {skip_in.shape}, my stride {self.stride}")
 
         skip = self.residual_conv(x)
         skip_in = self.skip_conv(skip_in)
 
         x = self.conv1(x)
-        print(f"conved {x.shape}")
+        print(f"conved {x.shape}, skip-in {skip_in.shape}, my stride {self.stride}")
         x = x + skip_in
         x = self.conv2(x)
         x = x + skip
 
-        return x 
+        return x

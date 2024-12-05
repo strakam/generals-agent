@@ -23,3 +23,4 @@ print(network)
 
 dummy_in = torch.randn(1, 55, 24, 24)
 out = network(dummy_in)
+print(out.shape)
