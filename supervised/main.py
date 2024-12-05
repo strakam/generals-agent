@@ -1,6 +1,8 @@
 import os
 import torch
 from dataloader import ReplayDataset, per_worker_init_fn
+from network import Pyramid
+from torchviz import make_dot
 
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(
@@ -12,7 +14,12 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=lambda x:x
 )
 
-c=0
-for i in dataloader:
-    c += 1
-    print(c)
+
+network = Pyramid()
+# print number of network parameters
+print(sum(p.numel() for p in network.parameters()))
+# print network
+print(network)
+
+dummy_in = torch.randn(1, 55, 24, 24)
+out = network(dummy_in)
