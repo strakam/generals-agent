@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import lightning as L
 
 
 class Network(torch.nn.Module):
@@ -8,7 +9,7 @@ class Network(torch.nn.Module):
 
         self.inc = DoubleConv(in_channels, 16)
         self.down1 = Down(16, 32)
-        self.fc = torch.nn.Linear(32 * 4 * 4 + 6, 32 * 4 * 4)
+        self.fc = torch.nn.Linear(32 * 2 * 2 + 6, 32 * 2 * 2)
         self.up1 = Up(32, 16)
         self.outc = torch.nn.Conv2d(16, 4, kernel_size=1)
 
@@ -18,7 +19,7 @@ class Network(torch.nn.Module):
         x2 = x2.view(x2.size(0), -1)
         x2 = torch.cat([x2, y], dim=1)
         x2 = self.fc(x2)
-        x2 = x2.view(x1.size(0), 32, 4, 4)
+        x2 = x2.view(x1.size(0), 32, 2, 2)
         x = self.up1(x2, x1)
         x = self.outc(x)
         return x
