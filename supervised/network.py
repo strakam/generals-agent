@@ -4,17 +4,16 @@ import torch.nn as nn
 class Pyramid(nn.Module):
     def __init__(
         self,
-        stage_blocks: list[int] = [2, 2],
-        stage_channels: list[int] = [256, 320],
+        stage_blocks: list[int] = [2, 2, 2],
+        stage_channels: list[int] = [256, 320, 384],
     ):
         super().__init__()
         # First convolution to adjust input channels
         self.first_conv = nn.Sequential(
-            nn.Conv2d(55, stage_channels[0], kernel_size=3, padding=1), nn.ReLU()
+            nn.Conv2d(55, 256, kernel_size=3, padding=1), nn.ReLU()
         )
         # Encoder stages
         self.encoder_stages = nn.ModuleList()
-        print("HIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
         self.skip_connections = []
 
         skip_channels = []
@@ -27,12 +26,10 @@ class Pyramid(nn.Module):
                 )
                 out_channels = stage_channels[i]
                 stage.append(ConvResBlock(in_channels, out_channels))
-                print(f"hir {in_channels}")
                 skip_channels.append(in_channels)
             if i < len(stage_blocks) - 1:  # Downsample
                 channels = stage_channels[i]
                 stage.append(ConvResBlock(channels, channels, stride=2))
-                print(f"down {channels}")
                 skip_channels.append(channels)
             self.encoder_stages.append(stage)
 
@@ -65,10 +62,6 @@ class Pyramid(nn.Module):
             for block in stage:
                 skip_out, x = block(x)
                 skip_connections.append(skip_out)
-
-        print("SKIPS")
-        for skip in skip_connections:
-            print(skip.shape)
 
         for stage in self.decoder_stages:
             for block in stage:
@@ -106,7 +99,7 @@ class DeconvResBlock(nn.Module):
                 nn.ConvTranspose2d(
                     in_channels,
                     out_channels // 2,
-                    3,
+                    kernel_size=3,
                     stride=stride,
                     padding=1,
                     output_padding=1,
@@ -122,10 +115,11 @@ class DeconvResBlock(nn.Module):
                 nn.ReLU(),
             )
             self.residual_conv = nn.Conv2d(in_channels, out_channels, 1, stride=stride)
+
         self.skip_conv = nn.Conv2d(
             skip_channels,
             out_channels // 2,
-            1,
+            kernel_size=1,
             stride=1,
         )
 
@@ -135,13 +129,10 @@ class DeconvResBlock(nn.Module):
         )
 
     def forward(self, x, skip_in):
-        print(f"x {x.shape}, skip-in {skip_in.shape}, my stride {self.stride}")
-
         skip = self.residual_conv(x)
         skip_in = self.skip_conv(skip_in)
 
         x = self.conv1(x)
-        print(f"conved {x.shape}, skip-in {skip_in.shape}, my stride {self.stride}")
         x = x + skip_in
         x = self.conv2(x)
         x = x + skip
