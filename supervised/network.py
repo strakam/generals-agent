@@ -4,8 +4,8 @@ import torch.nn as nn
 class Pyramid(nn.Module):
     def __init__(
         self,
-        stage_blocks: list[int] = [1, 1, 1],
-        stage_channels: list[int] = [256, 320, 384],
+        stage_blocks: list[int] = [2, 2],
+        stage_channels: list[int] = [256, 320],
     ):
         super().__init__()
         # First convolution to adjust input channels
@@ -48,6 +48,7 @@ class Pyramid(nn.Module):
             for block in stage:
                 skip_out, x = block(x)
                 skip_connections.append(skip_out)
+        skip_connections.append(x)
 
         print("SKIPS")
         for skip in skip_connections:
@@ -86,6 +87,7 @@ class ConvResBlock(nn.Module):
 class DeconvResBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, stride: int = 1):
         super().__init__()
+        self.stride = stride
 
         if stride == 2:
             self.conv1 = nn.Sequential(
@@ -95,12 +97,14 @@ class DeconvResBlock(nn.Module):
                 nn.ReLU(),
             )
             self.residual_conv = nn.ConvTranspose2d(in_channels, out_channels, 1, stride=stride, output_padding=1)
+            self.skip_conv = nn.ConvTranspose2d(in_channels, out_channels//2, 1, stride=stride, output_padding=1)
         else:
             self.conv1 = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels // 2, 3, stride=stride, padding=1),
                 nn.ReLU(),
             )
             self.residual_conv = nn.Conv2d(in_channels, out_channels, 1, stride=stride)
+            self.skip_conv = nn.Conv2d(in_channels, out_channels//2, 1, stride=stride)
 
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels // 2, out_channels, 3, padding=1),
@@ -109,11 +113,15 @@ class DeconvResBlock(nn.Module):
 
 
     def forward(self, x, skip_in):
-        print(f"before {x.shape}, skip {skip_in.shape}")
+        print(f"x {x.shape}, skip {skip_in.shape}, my stride {self.stride}")
 
         skip = self.residual_conv(x)
+        skip_in = self.skip_conv(skip_in)
+
         x = self.conv1(x)
+        print(f"conved {x.shape}")
+        x = x + skip_in
         x = self.conv2(x)
         x = x + skip
-        # print(f"after {x.shape}, skip {skip.shape}")
+
         return x 
