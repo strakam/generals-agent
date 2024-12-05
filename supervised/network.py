@@ -4,7 +4,7 @@ import torch.nn as nn
 class Pyramid(nn.Module):
     def __init__(
         self,
-        stage_blocks: list[int] = [2, 2, 2],
+        stage_blocks: list[int] = [1, 1, 1],
         stage_channels: list[int] = [256, 320, 384],
     ):
         super().__init__()
@@ -21,12 +21,25 @@ class Pyramid(nn.Module):
             for j in range(stage_blocks[i]):
                 in_channels = stage_channels[i-1] if j == 0 and i > 0 else stage_channels[i]
                 out_channels = stage_channels[i]
-                print(in_channels, out_channels)
                 stage.append(ConvResBlock(in_channels, out_channels))
-            if i < len(stage_blocks) - 1:
+            if i < len(stage_blocks) - 1: # Downsample
                 channels = stage_channels[i]
                 stage.append(ConvResBlock(channels, channels, stride=2))
             self.encoder_stages.append(stage)
+
+        # Decoder stages
+        self.decoder_stages = nn.ModuleList()
+
+        for i in range(len(stage_blocks) - 1, -1, -1):
+            stage = nn.ModuleList()
+            for j in range(stage_blocks[i]):
+                in_channels = stage_channels[i+1] if j == 0 and i < len(stage_blocks) - 1 else stage_channels[i]
+                out_channels = stage_channels[i]
+                stage.append(DeconvResBlock(in_channels, out_channels))
+            if i > 0: # Upsample
+                channels = stage_channels[i]
+                stage.append(DeconvResBlock(channels, channels, stride=2))
+            self.decoder_stages.append(stage)
 
     def forward(self, x):
         skip_connections = []
@@ -34,9 +47,19 @@ class Pyramid(nn.Module):
         for stage in self.encoder_stages:
             for block in stage:
                 skip_out, x = block(x)
-                print(x.shape)
                 skip_connections.append(skip_out)
-        return skip_connections
+
+        print("SKIPS")
+        for skip in skip_connections:
+            print(skip.shape)
+
+        for stage in self.decoder_stages:
+            for block in stage:
+                skip_in = skip_connections.pop()
+                x = block(x, skip_in)
+        return x
+
+
 
 
 
@@ -88,8 +111,9 @@ class DeconvResBlock(nn.Module):
     def forward(self, x, skip_in):
         print(f"before {x.shape}, skip {skip_in.shape}")
 
-        skip = self.residual_conv(skip_in)
+        skip = self.residual_conv(x)
         x = self.conv1(x)
         x = self.conv2(x)
-        print(f"after {x.shape}, skip {skip.shape}")
-        return x + skip 
+        x = x + skip
+        # print(f"after {x.shape}, skip {skip.shape}")
+        return x 
