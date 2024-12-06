@@ -1,16 +1,59 @@
+import torch
 import torch.nn as nn
+from torch.nn import functional as F
+import lightning as L
+
+
+class Network(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        dims = 24
+
+        channel_sequence = [256, 128, 128]
+
+        self.backbone = Pyramid(55, [2, 2, 2], channel_sequence)
+        final_channels = channel_sequence[0]
+
+        self.value_head = nn.Sequential(
+            Pyramid(final_channels, [], []),
+            nn.Conv2d(final_channels, 1, kernel_size=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(dims * dims, 1),
+        )
+
+        self.policy_pyramid = Pyramid(final_channels, [1], [final_channels])
+        self.square_head = nn.Conv2d(final_channels, 1, kernel_size=1)
+        self.direction_head = nn.Sequential(
+            nn.Conv2d(final_channels + 1, 1, kernel_size=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(dims * dims, 4),
+        )
+
+    def forward(self, x):
+        x = torch.tensor(x, dtype=torch.float32)
+        x = self.backbone(x)
+        value = self.value_head(x)
+
+        square = self.square_head(self.policy_pyramid(x))
+        square = F.gumbel_softmax(square.flatten(1), dim=1).reshape(-1, 24, 24)
+        direction = self.direction_head(torch.cat((x, square.unsqueeze(1)), dim=1))
+
+        return value, square, direction
 
 
 class Pyramid(nn.Module):
     def __init__(
         self,
+        input_channels: int = 55,
         stage_blocks: list[int] = [2, 2, 2],
         stage_channels: list[int] = [256, 320, 384],
     ):
         super().__init__()
         # First convolution to adjust input channels
         self.first_conv = nn.Sequential(
-            nn.Conv2d(55, 256, kernel_size=3, padding=1), nn.ReLU()
+            nn.Conv2d(input_channels, 256, kernel_size=3, padding=1), nn.ReLU()
         )
         # Encoder stages
         self.encoder_stages = nn.ModuleList()
