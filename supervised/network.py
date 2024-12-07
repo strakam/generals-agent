@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import lightning as L
+torch.set_printoptions(threshold=5000)
+torch.set_printoptions(profile="full")
+torch.set_printoptions(linewidth=200)
+
+
 
 
 class Network(L.LightningModule):
@@ -31,40 +36,63 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels + 1, 1, kernel_size=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(h * w, 4),
+            nn.Linear(h * w, 5),
         )
 
-    def forward(self, x):
-        x = x / 50
-        x = self.backbone(x)
-        value = self.value_head(x)
+    def forward(self, obs, mask):
+        x = self.backbone(obs)
+        # value = self.value_head(x)
 
-        square_logits = self.square_head(self.policy_pyramid(x)).flatten(1)
-        square = F.gumbel_softmax(square_logits, dim=1)
-        square_reshaped = square.reshape(-1, 24, 24)
-        direction = self.direction_head(
-            torch.cat((x, square_reshaped.unsqueeze(1)), dim=1)
-        )
-
-        return value, square_logits, direction
+        # perform "or" operation on last channel of the mask
+        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9 # cells that i dont own
+        square_logits = self.square_head(self.policy_pyramid(x))
+        square_logits = (square_logits + square_mask).flatten(1)
+        # square = F.gumbel_softmax(square_logits, dim=1)
+        # square_index = torch.argmax(square, dim=1)
+        # # use square_index to get the coordinates of the square so we can pick the correct cell from mask
+        # square_i = square_index // 24
+        # square_j = square_index % 24
+        # batch_indices = torch.arange(obs.shape[0])
+        #
+        # direction_mask = 1 - mask[batch_indices, :, square_i, square_j]
+        # direction_mask = direction_mask * 1e9
+        # square_reshaped = square.reshape(-1, 24, 24).unsqueeze(1)
+        # direction = self.direction_head(torch.cat((x, square_reshaped), dim=1))
+        # direction = direction + direction_mask
+        return None, square_logits, None
 
     def training_step(self, batch, batch_idx):
-        inputs, targets = batch
-        target_i = targets[:, 1]
-        target_j = targets[:, 2]
+        obs, mask, target = batch
+        target_i = target[:, 1]
+        target_j = target[:, 2]
         target_cell = (target_i * 24 + target_j).float()
 
-        _, square, direction = self(inputs) # square is 
+        # check mask value in target cells
+        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -8 # cells that i dont own
+        batch_indices = torch.arange(obs.shape[0])
+
+
+        _, square, _ = self(obs, mask)  # square is
+
+        preds = square.argmax(1)
+        # compute accuracy for batch
+        accuracy = (preds == target_cell).float().mean()
+
+        self.log("accuracy", accuracy, on_step=True, on_epoch=True, prog_bar=True)
 
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
-        direction_loss = F.cross_entropy(direction, targets[:, 3])
-        
-        loss = square_loss + direction_loss
+        # direction_loss = F.cross_entropy(direction, targets[:, 3])
 
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        # loss = square_loss + direction_loss
 
-        return loss
+        self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
+        # self.log(
+        #     "direction_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True
+        # )
+        # self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        return square_loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.0005)
@@ -79,7 +107,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 32 if stage_channels == [] else stage_channels[0]
+        first_channels = 128 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),

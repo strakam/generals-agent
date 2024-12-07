@@ -10,13 +10,15 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         self.A = ReplayAgent(id="A", color="red")
         self.B = ReplayAgent(id="B", color="blue")
-
         self.env = None
 
     def __iter__(self):
-        obs, info = self.env.reset()
-        self.A.give_actions(info[0])
-        self.B.give_actions(info[1])
+        obs, moves, bases = self.env.reset()
+        self.A.replay_moves = moves[0]
+        self.B.replay_moves = moves[1]
+        self.A.general_position = bases[self.A.id]
+        self.B.general_position = bases[self.B.id]
+
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
@@ -26,9 +28,11 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
             self.env.render()
             if all(terminated.values()) or all(truncated.values()):
-                obs, info = self.env.reset()
-                self.A.give_actions(info[0])
-                self.B.give_actions(info[1])
+                obs, moves, bases = self.env.reset()
+                self.A.replay_moves = moves[0]
+                self.B.replay_moves = moves[1]
+                self.A.general_position = bases[self.A.id]
+                self.B.general_position = bases[self.B.id]
 
 
 def per_worker_init_fn(worker_id):

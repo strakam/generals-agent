@@ -22,7 +22,7 @@ RewardFn: TypeAlias = Callable[[Observation, Action, bool, Info], Reward]
 class PettingZooGenerals(pettingzoo.ParallelEnv):
     metadata: dict[str, Any] = {
         "render_modes": ["human"],
-        "render_fps": 6,
+        "render_fps": 8,
     }
 
     def __init__(
@@ -114,7 +114,10 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         map_str = "\n".join(["".join(row) for row in map])
         self.replay_idx += 1
         self.replay_idx %= len(self.replay_files)
-        return map_str, player_moves
+        return (
+            map_str,
+            player_moves,
+        )
 
     def reset(
         self, seed: int | None = None, options: dict | None = None
@@ -130,6 +133,11 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         self.game = Game(grid, self.agents)
         self.time = 0
 
+        player_bases = {
+            self.agents[0]: self.game.general_positions[self.agents[0]],
+            self.agents[1]: self.game.general_positions[self.agents[1]],
+        }
+
         if self.render_mode == "human":
             self.gui = GUI(self.game, self.agent_data, GuiMode.TRAIN)
 
@@ -138,14 +146,12 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         }
 
         self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
-
         self.army_stack[0, 0, :, :] = observations[self.agents[0]]["observation"][
             "armies"
         ]
         self.army_stack[1, 0, :, :] = observations[self.agents[1]]["observation"][
             "armies"
         ]
-
         self.cities = [
             np.array(observations[agent]["observation"]["cities"]).astype(bool)
             for agent in self.agents
@@ -159,48 +165,44 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
             for agent in self.agents
         ]
         observations = self.prepare_observations(observations)
-        return observations, player_moves
+        return observations, player_moves, player_bases
 
     def prepare_observations(self, observations):
         # 40 (history) + 15 classic
         # update history stack
+        _obs = {}
         for i, agent in enumerate(self.agents):
+            obs = observations[agent]["observation"]
+            mask = observations[agent]["action_mask"]
             self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
-            self.army_stack[i, 0, :, :] = (
-                observations[agent]["observation"]["armies"]
-                - self.army_stack[i, 1, :, :]
+            self.army_stack[i, 0, :, :] = obs["armies"] - self.army_stack[i, 1, :, :]
+            self.cities[i] |= obs["cities"]
+            self.generals[i] |= obs["generals"]
+            self.mountains[i] |= obs["mountains"]
+            _obs[agent] = (
+                np.stack(
+                    [
+                        obs["armies"] / 250,
+                        self.generals[i],
+                        self.cities[i],
+                        self.mountains[i],
+                        obs["neutral_cells"],
+                        obs["owned_cells"],
+                        obs["opponent_cells"],
+                        obs["fog_cells"],
+                        obs["structures_in_fog"],
+                        obs["owned_land_count"] * np.ones((24, 24)) / 250,
+                        obs["owned_army_count"] * np.ones((24, 24)) / 250,
+                        obs["opponent_land_count"] * np.ones((24, 24)) / 250,
+                        obs["opponent_army_count"] * np.ones((24, 24)) / 250,
+                        obs["timestep"] * np.ones((24, 24)) / 250,
+                        obs["priority"] * np.ones((24, 24)),
+                        *self.army_stack[i] / 250,
+                    ]
+                ),
+                mask,
             )
-            self.cities[i] |= observations[agent]["observation"]["cities"]
-            self.generals[i] |= observations[agent]["observation"]["generals"]
-            self.mountains[i] |= observations[agent]["observation"]["mountains"]
-
-        return {
-            agent: np.stack(
-                [
-                    observations[agent]["observation"]["armies"] / 50,
-                    self.generals[i],
-                    self.cities[i],
-                    self.mountains[i],
-                    observations[agent]["observation"]["neutral_cells"],
-                    observations[agent]["observation"]["owned_cells"],
-                    observations[agent]["observation"]["opponent_cells"],
-                    observations[agent]["observation"]["fog_cells"],
-                    observations[agent]["observation"]["structures_in_fog"],
-                    observations[agent]["observation"]["owned_land_count"]
-                    * np.ones((24, 24)),
-                    observations[agent]["observation"]["owned_army_count"]
-                    * np.ones((24, 24)),
-                    observations[agent]["observation"]["opponent_land_count"]
-                    * np.ones((24, 24)),
-                    observations[agent]["observation"]["opponent_army_count"]
-                    * np.ones((24, 24)),
-                    observations[agent]["observation"]["timestep"] * np.ones((24, 24)),
-                    observations[agent]["observation"]["priority"] * np.ones((24, 24)),
-                    *self.army_stack[i] / 200,
-                ]
-            )
-            for i, agent in enumerate(self.agents)
-        }
+        return _obs
 
     def step(
         self, actions: dict[AgentID, Action]
