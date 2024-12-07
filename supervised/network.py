@@ -5,13 +5,16 @@ import lightning as L
 
 
 class Network(L.LightningModule):
-    def __init__(self):
+    def __init__(
+        self,
+        input_dims: tuple[int, int, int] = (55, 24, 24),
+        repeats: list[int] = [2, 2, 2],
+        channel_sequence: list[int] = [32, 32, 32],
+    ):
         super().__init__()
-        dims = 24
+        c, h, w = input_dims
 
-        channel_sequence = [256, 128, 128]
-
-        self.backbone = Pyramid(55, [2, 2, 2], channel_sequence)
+        self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
         self.value_head = nn.Sequential(
@@ -19,7 +22,7 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 1, kernel_size=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(dims * dims, 1),
+            nn.Linear(h * w, 1),
         )
 
         self.policy_pyramid = Pyramid(final_channels, [1], [final_channels])
@@ -28,19 +31,43 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels + 1, 1, kernel_size=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(dims * dims, 4),
+            nn.Linear(h * w, 4),
         )
 
     def forward(self, x):
-        x = torch.tensor(x, dtype=torch.float32)
+        x = x / 50
         x = self.backbone(x)
         value = self.value_head(x)
 
-        square = self.square_head(self.policy_pyramid(x))
-        square = F.gumbel_softmax(square.flatten(1), dim=1).reshape(-1, 24, 24)
-        direction = self.direction_head(torch.cat((x, square.unsqueeze(1)), dim=1))
+        square_logits = self.square_head(self.policy_pyramid(x)).flatten(1)
+        square = F.gumbel_softmax(square_logits, dim=1)
+        square_reshaped = square.reshape(-1, 24, 24)
+        direction = self.direction_head(
+            torch.cat((x, square_reshaped.unsqueeze(1)), dim=1)
+        )
 
-        return value, square, direction
+        return value, square_logits, direction
+
+    def training_step(self, batch, batch_idx):
+        inputs, targets = batch
+        target_i = targets[:, 1]
+        target_j = targets[:, 2]
+        target_cell = (target_i * 24 + target_j).float()
+
+        _, square, direction = self(inputs) # square is 
+
+        # crossentropy loss for square loss and direction loss
+        square_loss = F.cross_entropy(square, target_cell.long())
+        direction_loss = F.cross_entropy(direction, targets[:, 3])
+        
+        loss = square_loss + direction_loss
+
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=0.0005)
 
 
 class Pyramid(nn.Module):
@@ -52,8 +79,10 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
+        first_channels = 32 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
-            nn.Conv2d(input_channels, 256, kernel_size=3, padding=1), nn.ReLU()
+            nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
         )
         # Encoder stages
         self.encoder_stages = nn.ModuleList()

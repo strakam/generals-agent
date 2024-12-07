@@ -20,9 +20,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
-
-            yield (obs['A'], actions[a])
-            yield (obs['B'], actions[b])
+            yield (obs[a], actions[a])
+            # yield (obs[b], actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
 
             self.env.render()

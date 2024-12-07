@@ -67,7 +67,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
     def next_replay(self):
         game = json.load(open(self.replay_files[self.replay_idx]))
-        # print(f"Loaded: {self.replay_files[self.replay_idx]}")
         self.game_length = 1e4 if game["afks"] == [] else game["afks"][0][1]
         width = game["mapWidth"]
         height = game["mapHeight"]
@@ -139,6 +138,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         }
 
         self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
+
         self.army_stack[0, 0, :, :] = observations[self.agents[0]]["observation"][
             "armies"
         ]
@@ -177,7 +177,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         return {
             agent: np.stack(
                 [
-                    observations[agent]["observation"]["armies"],
+                    observations[agent]["observation"]["armies"] / 50,
                     self.generals[i],
                     self.cities[i],
                     self.mountains[i],
@@ -186,13 +186,17 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
                     observations[agent]["observation"]["opponent_cells"],
                     observations[agent]["observation"]["fog_cells"],
                     observations[agent]["observation"]["structures_in_fog"],
-                    observations[agent]["observation"]["owned_land_count"] * np.ones((24, 24)),
-                    observations[agent]["observation"]["owned_army_count"] * np.ones((24, 24)),
-                    observations[agent]["observation"]["opponent_land_count"] * np.ones((24, 24)),
-                    observations[agent]["observation"]["opponent_army_count"] * np.ones((24, 24)),
+                    observations[agent]["observation"]["owned_land_count"]
+                    * np.ones((24, 24)),
+                    observations[agent]["observation"]["owned_army_count"]
+                    * np.ones((24, 24)),
+                    observations[agent]["observation"]["opponent_land_count"]
+                    * np.ones((24, 24)),
+                    observations[agent]["observation"]["opponent_army_count"]
+                    * np.ones((24, 24)),
                     observations[agent]["observation"]["timestep"] * np.ones((24, 24)),
                     observations[agent]["observation"]["priority"] * np.ones((24, 24)),
-                    *self.army_stack[i]
+                    *self.army_stack[i] / 200,
                 ]
             )
             for i, agent in enumerate(self.agents)
