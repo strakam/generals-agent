@@ -31,7 +31,7 @@ class Network(L.LightningModule):
 
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
-            nn.Conv2d(final_channels, 1, kernel_size=1),
+            nn.Conv2d(final_channels, 1, kernel_size=3),
         )
 
         self.direction_head = nn.Sequential(
