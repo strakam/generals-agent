@@ -29,13 +29,14 @@ class Network(L.LightningModule):
             nn.Linear(h * w, 1),
         )
 
-        self.policy_pyramid = Pyramid(final_channels, [1], [final_channels])
-        self.square_head = nn.Conv2d(final_channels, 1, kernel_size=1)
+        self.square_head = nn.Sequential(
+            Pyramid(final_channels, [1], [final_channels]),
+            nn.Conv2d(final_channels, 1, kernel_size=1),
+        )
+
         self.direction_head = nn.Sequential(
-            nn.Conv2d(final_channels + 1, 1, kernel_size=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(h * w, 5),
+            Pyramid(final_channels + 1, [1], [final_channels]),
+            nn.Conv2d(final_channels, 5, kernel_size=1),
         )
 
     def forward(self, obs, mask, teacher_cells=None):
@@ -43,7 +44,7 @@ class Network(L.LightningModule):
         # value = self.value_head(x)
 
         square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
-        square_logits = self.square_head(self.policy_pyramid(x))
+        square_logits = self.square_head(x)
         square_logits = (square_logits + square_mask).flatten(1)
 
         if teacher_cells is not None:
@@ -53,27 +54,17 @@ class Network(L.LightningModule):
         square_reshaped = (
             F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         )
-        print(square.shape)
-        print(square_reshaped.shape)
 
-        mask = mask.permute(0, 3, 1, 2)
-        direction_mask = (
-            1
-            - mask[
-                torch.arange(mask.shape[0]),
-                :,
-                square // 24,
-                square % 24,
-            ]
-        )
+        mask = 1 - mask.permute(0, 3, 1, 2)
+        direction_mask = torch.cat((mask, torch.zeros(mask.shape[0], 1, 24, 24)), dim=1)
         direction_mask = direction_mask * -1e9
-        direction_mask = torch.cat(
-            (direction_mask, torch.zeros(mask.shape[0], 1)), dim=1
-        )
 
         representation_with_square = torch.cat((x, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
+        # take argmax
+        i, j = square // 24, square % 24
+        direction = direction[torch.arange(direction.shape[0]), :, i, j]
         return None, square_logits, direction
 
     def training_step(self, batch, batch_idx):
@@ -82,21 +73,16 @@ class Network(L.LightningModule):
         target_j = target[:, 2]
         target_cell = target_i * 24 + target_j
 
-        _, square, direction = self(obs, mask, target_cell)  # square is
+        _, square, direction = self(obs, mask, target_cell)
 
-        # print(d_logits)
-        # print(d_logits.shape)
-        # print(mask[42, target[42, 1], target[42, 2]])
-        # print(target[42])
-        # print(direction[42])
-        # print(torch.argmin(d_logits))
-        # print(target_d.shape)
-        # print(direction.shape)
-        # exit()
-
-        preds = square.argmax(1)
+        pred_squares = square.argmax(1)
+        pred_directions = direction.argmax(1)
         # compute accuracy for batch
-        accuracy = (preds == target_cell).float().mean()
+        squares_predicted = (pred_squares == target_cell).float()
+        direction_predicted = (pred_directions == target[:, 3]).float()
+        accuracy = (squares_predicted * direction_predicted).sum() / len(
+            squares_predicted
+        )
         self.log("accuracy", accuracy, on_step=True, on_epoch=True, prog_bar=True)
 
         # crossentropy loss for square loss and direction loss
@@ -114,7 +100,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.0005)
+        return torch.optim.Adam(self.parameters(), lr=0.001)
 
 
 class Pyramid(nn.Module):
