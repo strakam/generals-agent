@@ -2,11 +2,10 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import lightning as L
+
 torch.set_printoptions(threshold=5000)
 torch.set_printoptions(profile="full")
 torch.set_printoptions(linewidth=200)
-
-
 
 
 class Network(L.LightningModule):
@@ -39,60 +38,80 @@ class Network(L.LightningModule):
             nn.Linear(h * w, 5),
         )
 
-    def forward(self, obs, mask):
+    def forward(self, obs, mask, teacher_cells=None):
         x = self.backbone(obs)
         # value = self.value_head(x)
 
-        # perform "or" operation on last channel of the mask
-        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9 # cells that i dont own
+        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
         square_logits = self.square_head(self.policy_pyramid(x))
         square_logits = (square_logits + square_mask).flatten(1)
-        # square = F.gumbel_softmax(square_logits, dim=1)
-        # square_index = torch.argmax(square, dim=1)
-        # # use square_index to get the coordinates of the square so we can pick the correct cell from mask
-        # square_i = square_index // 24
-        # square_j = square_index % 24
-        # batch_indices = torch.arange(obs.shape[0])
-        #
-        # direction_mask = 1 - mask[batch_indices, :, square_i, square_j]
-        # direction_mask = direction_mask * 1e9
-        # square_reshaped = square.reshape(-1, 24, 24).unsqueeze(1)
-        # direction = self.direction_head(torch.cat((x, square_reshaped), dim=1))
-        # direction = direction + direction_mask
-        return None, square_logits, None
+
+        if teacher_cells is not None:
+            square = teacher_cells.int()
+        else:
+            square = torch.argmax(square_logits, dim=1).int()
+        square_reshaped = (
+            F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
+        )
+        print(square.shape)
+        print(square_reshaped.shape)
+
+        mask = mask.permute(0, 3, 1, 2)
+        direction_mask = (
+            1
+            - mask[
+                torch.arange(mask.shape[0]),
+                :,
+                square // 24,
+                square % 24,
+            ]
+        )
+        direction_mask = direction_mask * -1e9
+        direction_mask = torch.cat(
+            (direction_mask, torch.zeros(mask.shape[0], 1)), dim=1
+        )
+
+        representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        direction = self.direction_head(representation_with_square)
+        direction = direction + direction_mask
+        return None, square_logits, direction
 
     def training_step(self, batch, batch_idx):
         obs, mask, target = batch
         target_i = target[:, 1]
         target_j = target[:, 2]
-        target_cell = (target_i * 24 + target_j).float()
+        target_cell = target_i * 24 + target_j
 
-        # check mask value in target cells
-        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -8 # cells that i dont own
-        batch_indices = torch.arange(obs.shape[0])
+        _, square, direction = self(obs, mask, target_cell)  # square is
 
-
-        _, square, _ = self(obs, mask)  # square is
+        # print(d_logits)
+        # print(d_logits.shape)
+        # print(mask[42, target[42, 1], target[42, 2]])
+        # print(target[42])
+        # print(direction[42])
+        # print(torch.argmin(d_logits))
+        # print(target_d.shape)
+        # print(direction.shape)
+        # exit()
 
         preds = square.argmax(1)
         # compute accuracy for batch
         accuracy = (preds == target_cell).float().mean()
-
         self.log("accuracy", accuracy, on_step=True, on_epoch=True, prog_bar=True)
 
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
-        # direction_loss = F.cross_entropy(direction, targets[:, 3])
+        direction_loss = F.cross_entropy(direction, target[:, 3])
 
-        # loss = square_loss + direction_loss
+        loss = square_loss + direction_loss
 
         self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
-        # self.log(
-        #     "direction_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True
-        # )
-        # self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "direction_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True
+        )
+        self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        return square_loss
+        return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.0005)
