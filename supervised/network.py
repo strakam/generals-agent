@@ -36,7 +36,7 @@ class Network(L.LightningModule):
 
         self.direction_head = nn.Sequential(
             Pyramid(final_channels + 1, [1], [final_channels]),
-            nn.Conv2d(final_channels, 5, kernel_size=1),
+            nn.Conv2d(final_channels, 5, kernel_size=3),
         )
 
     def forward(self, obs, mask, teacher_cells=None):
