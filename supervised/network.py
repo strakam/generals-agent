@@ -13,7 +13,7 @@ class Network(L.LightningModule):
         self,
         input_dims: tuple[int, int, int] = (55, 24, 24),
         repeats: list[int] = [2, 2, 2],
-        channel_sequence: list[int] = [32, 32, 32],
+        channel_sequence: list[int] = [256, 320, 384],
     ):
         super().__init__()
         c, h, w = input_dims
@@ -31,12 +31,12 @@ class Network(L.LightningModule):
 
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
-            nn.Conv2d(final_channels, 1, kernel_size=3),
+            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
         )
 
         self.direction_head = nn.Sequential(
             Pyramid(final_channels + 1, [1], [final_channels]),
-            nn.Conv2d(final_channels, 5, kernel_size=3),
+            nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
     def forward(self, obs, mask, teacher_cells=None):
@@ -100,7 +100,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.001)
+        return torch.optim.Adam(self.parameters(), lr=3e-4)
 
 
 class Pyramid(nn.Module):
@@ -112,7 +112,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 128 if stage_channels == [] else stage_channels[0]
+        first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),

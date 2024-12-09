@@ -10,6 +10,7 @@ from replay_agent import ReplayAgent
 from petting_replays import PettingZooGenerals
 
 torch.manual_seed(0)
+a,b = 1,2
 
 
 
@@ -19,40 +20,40 @@ def collate_fn(batch):
     actions = torch.from_numpy(np.array([b[1] for b in batch]))
     return observations, masks, actions
 
-replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[:1]]
+replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[a:b]]
 
 print(replays)
-# dataloader = torch.utils.data.DataLoader(
-#     ReplayDataset(
-#         [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[:1]]
-#     ),
-#     batch_size=64,
-#     num_workers=1,
-#     worker_init_fn=per_worker_init_fn,
-#     collate_fn=collate_fn,
-# )
-#
-# # t=0
-# # for b in dataloader:
-# #     obs, masks, actions = b
-# #     i, j, d = actions[0][1], actions[0][2], actions[0][3]
-# #     print(masks[0, i, j], t, actions[0])
-# #     t+=1
-# #     if t == 50:
-# #         break
-#
-# network = Network(input_dims=(55, 24, 24), channel_sequence=[128, 128, 128])
-#
-# trainer = L.Trainer(fast_dev_run = 300)
-# trainer.fit(network, train_dataloaders=dataloader)
-#
-# # save model
-# torch.save(network.state_dict(), "network.pt")
+dataloader = torch.utils.data.DataLoader(
+    ReplayDataset(
+        [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[a:b]]
+    ),
+    batch_size=128,
+    num_workers=1,
+    worker_init_fn=per_worker_init_fn,
+    collate_fn=collate_fn,
+)
+
+# t=0
+# for b in dataloader:
+#     obs, masks, actions = b
+#     i, j, d = actions[0][1], actions[0][2], actions[0][3]
+#     print(masks[0, i, j], t, actions[0])
+#     t+=1
+#     if t == 50:
+#         break
+
+network = Network(input_dims=(55, 24, 24))
+
+trainer = L.Trainer(fast_dev_run = 300)
+trainer.fit(network, train_dataloaders=dataloader)
+
+# save model
+torch.save(network.state_dict(), "network.pt")
 # #
 # #
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(
-        [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[:1]]
+        [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[a:b]]
     ),
     batch_size=1,
     num_workers=1,
@@ -62,7 +63,7 @@ dataloader = torch.utils.data.DataLoader(
 #
 #
 # load model
-network = Network(input_dims=(55, 24, 24), channel_sequence=[128, 128, 128])
+network = Network(input_dims=(55, 24, 24))
 network.load_state_dict(torch.load("network.pt"))
 
 trues = []
@@ -92,7 +93,7 @@ env = PettingZooGenerals(
         "A": random,
         "B": replayer
     },
-    replay_files=[f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[:1]],
+    replay_files=[f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")[a:b]],
     render_mode="human"
 )
 
