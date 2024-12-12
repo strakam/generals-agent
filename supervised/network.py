@@ -3,10 +3,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 import lightning as L
 
-torch.set_printoptions(threshold=5000)
-torch.set_printoptions(profile="full")
-torch.set_printoptions(linewidth=200)
-
 
 class Network(L.LightningModule):
     def __init__(
@@ -56,7 +52,8 @@ class Network(L.LightningModule):
         )
 
         mask = 1 - mask.permute(0, 3, 1, 2)
-        direction_mask = torch.cat((mask, torch.zeros(mask.shape[0], 1, 24, 24)), dim=1)
+        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
+        direction_mask = torch.cat((mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
 
         representation_with_square = torch.cat((x, square_reshaped), dim=1)
