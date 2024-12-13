@@ -2,6 +2,7 @@ from petting_replays import PettingZooGenerals
 from replay_agent import ReplayAgent
 import torch
 import math
+import numpy as np
 
 
 class ReplayDataset(torch.utils.data.IterableDataset):
@@ -54,3 +55,9 @@ def per_worker_init_fn(worker_id):
         replay_files=[name for name in dataset.replay_files[start:end]],
         render_mode=None,
     )
+
+def collate_fn(batch):
+    observations = torch.from_numpy(np.array([b[0][0] for b in batch])).float()
+    masks = torch.from_numpy(np.array([b[0][1] for b in batch])).float()
+    actions = torch.from_numpy(np.array([b[1] for b in batch]))
+    return observations, masks, actions
