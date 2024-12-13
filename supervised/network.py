@@ -19,7 +19,7 @@ class Network(L.LightningModule):
 
         self.value_head = nn.Sequential(
             Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=1),
+            nn.Conv2d(final_channels, 1, kernel_size=3),
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
@@ -35,7 +35,22 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
+    def normalize_observations(self, obs):
+        timestep_normalize = 700
+        army_normalize = 3000
+        land_normalize = 24 * 24
+
+        obs[:, 0, :, :] = obs[:, 0, :, :] / army_normalize
+        obs[:, 10, :, :] = obs[:, 10, :, :] / army_normalize
+        obs[:, 12, :, :] = obs[:, 12, :, :] / army_normalize
+        obs[:, 9, :, :] = obs[:, 9, :, :] / land_normalize
+        obs[:, 11, :, :] = obs[:, 11, :, :] / land_normalize
+        obs[:, 13, :, :] = obs[:, 13, :, :] / timestep_normalize
+        obs[:, 15:, :, :] = obs[:, 15:, :, :] / army_normalize
+        return obs
+
     def forward(self, obs, mask, teacher_cells=None):
+        obs = self.normalize_observations(obs)
         x = self.backbone(obs)
         # value = self.value_head(x)
 
@@ -44,7 +59,7 @@ class Network(L.LightningModule):
         square_logits = (square_logits + square_mask).flatten(1)
 
         if teacher_cells is not None:
-            square = teacher_cells.int()
+            square = teacher_cells
         else:
             square = torch.argmax(square_logits, dim=1).int()
         square_reshaped = (
@@ -74,7 +89,6 @@ class Network(L.LightningModule):
 
         pred_squares = square.argmax(1)
         pred_directions = direction.argmax(1)
-        # compute accuracy for batch
         squares_predicted = (pred_squares == target_cell).float()
         direction_predicted = (pred_directions == target[:, 3]).float()
         accuracy = (squares_predicted * direction_predicted).sum() / len(
@@ -89,9 +103,7 @@ class Network(L.LightningModule):
         loss = square_loss + direction_loss
 
         self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log(
-            "direction_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True
-        )
+        self.log("dir_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss

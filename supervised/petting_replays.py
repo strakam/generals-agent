@@ -67,7 +67,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
     def next_replay(self):
         game = json.load(open(self.replay_files[self.replay_idx]))
-        self.game_length = 1e4 if game["afks"] == [] else game["afks"][0][1]
+        self.game_length = 2e4 if game["afks"] == [] else game["afks"][0][1]
         width = game["mapWidth"]
         height = game["mapHeight"]
 
@@ -173,7 +173,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         _obs = {}
         for i, agent in enumerate(self.agents):
             obs = observations[agent]["observation"]
-            mask = observations[agent]["action_mask"]
             self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
             self.army_stack[i, 0, :, :] = obs["armies"] - self.army_stack[i, 1, :, :]
             self.cities[i] |= obs["cities"]
@@ -182,7 +181,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
             _obs[agent] = (
                 np.stack(
                     [
-                        obs["armies"] / 250,
+                        obs["armies"],
                         self.generals[i],
                         self.cities[i],
                         self.mountains[i],
@@ -191,16 +190,16 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
                         obs["opponent_cells"],
                         obs["fog_cells"],
                         obs["structures_in_fog"],
-                        obs["owned_land_count"] * np.ones((24, 24)) / 250,
-                        obs["owned_army_count"] * np.ones((24, 24)) / 250,
-                        obs["opponent_land_count"] * np.ones((24, 24)) / 250,
-                        obs["opponent_army_count"] * np.ones((24, 24)) / 250,
-                        obs["timestep"] * np.ones((24, 24)) / 250,
+                        obs["owned_land_count"] * np.ones((24, 24)),
+                        obs["owned_army_count"] * np.ones((24, 24)),
+                        obs["opponent_land_count"] * np.ones((24, 24)),
+                        obs["opponent_army_count"] * np.ones((24, 24)),
+                        obs["timestep"] * np.ones((24, 24)),
                         obs["priority"] * np.ones((24, 24)),
-                        *self.army_stack[i] / 250,
+                        *self.army_stack[i],
                     ]
                 ),
-                mask,
+                observations[agent]["action_mask"],
             )
         return _obs
 
