@@ -89,30 +89,30 @@ class Network(L.LightningModule):
         value, square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
-        square_loss = F.cross_entropy(square, target_cell.long(), reduction="none")
-        direction_loss = F.cross_entropy(direction, actions[:, 3], reduction="none")
-        value_loss = F.mse_loss(value.flatten(), values, reduction="none")
+        square_loss = F.cross_entropy(square, target_cell.long())
+        direction_loss = F.cross_entropy(direction, actions[:, 3])
+        value_loss = F.mse_loss(value.flatten(), values)
 
-        loss = square_loss.mean() + direction_loss.mean() + value_loss.mean()
-        if loss > 1e1:
-            # round to 2 places
-            print(f"Loss is too high on batch {batch_idx},\
-                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
-            # print replay id where loss is high like this (square loss, direction loss, value loss, replay id)
-            # for each sample in the batch
-            for i in range(len(square_loss)):
-                print(
-                    f"{square_loss[i]:.2f}, {direction_loss[i]:.2f}, {value_loss[i]:.2f}, {replay_ids[i]}"
-                )
-            exit()
-
-            return None
+        loss = square_loss + direction_loss + value_loss
+        # if loss > 1e1:
+        #     # round to 2 places
+        #     print(f"Loss is too high on batch {batch_idx},\
+        #         s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
+        #     # print replay id where loss is high like this (square loss, direction loss, value loss, replay id)
+        #     # for each sample in the batch
+        #     for i in range(len(square_loss)):
+        #         print(
+        #             f"{square_loss[i]:.2f}, {direction_loss[i]:.2f}, {value_loss[i]:.2f}, {replay_ids[i]}"
+        #         )
+        #     exit()
+        #
+        #     return None
         # loss
-        self.log("value_loss", value_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log("square_loss", square_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log("dir_loss", direction_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-
+        bs = obs.size(0)
+        self.log("value_loss", value_loss, on_step=True, prog_bar=True, batch_size=bs)
+        self.log("square_loss", square_loss, on_step=True, prog_bar=True, batch_size=bs)
+        self.log("dir_loss", direction_loss, on_step=True, prog_bar=True, batch_size=bs)
+        self.log("loss", loss, on_step=True, prog_bar=True, batch_size=bs)
         return loss
 
     def configure_optimizers(self):

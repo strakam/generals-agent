@@ -3,41 +3,50 @@ import torch
 import lightning as L
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from network import Network
+from pytorch_lightning.loggers.neptune import NeptuneLogger
 
 torch.manual_seed(0)
 
 key_file = open("neptune_token.txt", "r")
 key = key_file.read()
-# neptune_logger = NeptuneLogger(
-#     api_key=key,
-#     project="strakam/supervised-agent",
-# )
+neptune_logger = NeptuneLogger(
+    api_key=key,
+    project="strakam/supervised-agent",
+)
 
 
 replays = [
     f"all_replays/new_value/{name}" for name in os.listdir("all_replays/new_value/")
 ]
+replays += [
+    f"all_replays/old_value/{name}" for name in os.listdir("all_replays/old_value/")
+]
 
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(replays),
-    batch_size=32,
-    num_workers=12,
+    batch_size=768,
+    num_workers=64,
     worker_init_fn=per_worker_init_fn,
     collate_fn=collate_fn,
 )
 
-network = Network(input_dims=(55, 24, 24))
+model = Network(input_dims=(55, 24, 24))
+# also try torch.compile(model, mode="reduce-overhead")
+# also try compiled_model = torch.compile(model, options={"shape_padding": True})
+# model = torch.compile(model)
+
 
 trainer = L.Trainer(
+    logger=neptune_logger,
     log_every_n_steps=20,
     gradient_clip_val=5.0,
     gradient_clip_algorithm="norm",
 )
 # trainer = L.Trainer()
-trainer.fit(network, train_dataloaders=dataloader)
+trainer.fit(model, train_dataloaders=dataloader)
 
 # save model
-torch.save(network.state_dict(), "network.pt")
+torch.save(model.state_dict(), "network.pt")
 
 # random = RandomAgent(id="A")
 # replayer = ReplayAgent(id="B", color=(0, 0, 238))
