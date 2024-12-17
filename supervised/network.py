@@ -88,21 +88,15 @@ class Network(L.LightningModule):
 
         value, square, direction = self(obs, mask, target_cell)
 
-        pred_squares = square.argmax(1)
-        pred_directions = direction.argmax(1)
-        squares_predicted = (pred_squares == target_cell).float()
-        direction_predicted = (pred_directions == actions[:, 3]).float()
-        accuracy = (squares_predicted * direction_predicted).sum() / len(
-            squares_predicted
-        )
-        self.log("accuracy", accuracy, on_step=True, on_epoch=True, prog_bar=True)
-
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
         direction_loss = F.cross_entropy(direction, actions[:, 3])
         value_loss = F.mse_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss + value_loss
+        if loss > 1e3:
+            print(f"Loss is too high on batch {batch_idx}")
+            return None
         # loss
         self.log("value_loss", value_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
