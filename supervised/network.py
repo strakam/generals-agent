@@ -23,7 +23,7 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
-            nn.Sigmoid(),
+            nn.Tanh(),
         )
 
         self.square_head = nn.Sequential(
@@ -81,7 +81,7 @@ class Network(L.LightningModule):
         return value, square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, values, actions = batch
+        obs, mask, values, actions, replay_ids = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
@@ -89,24 +89,34 @@ class Network(L.LightningModule):
         value, square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
-        square_loss = F.cross_entropy(square, target_cell.long())
-        direction_loss = F.cross_entropy(direction, actions[:, 3])
-        value_loss = F.mse_loss(value.flatten(), values)
+        square_loss = F.cross_entropy(square, target_cell.long(), reduction="none")
+        direction_loss = F.cross_entropy(direction, actions[:, 3], reduction="none")
+        value_loss = F.mse_loss(value.flatten(), values, reduction="none")
 
-        loss = square_loss + direction_loss + value_loss
-        if loss > 1e3:
-            print(f"Loss is too high on batch {batch_idx}")
+        loss = square_loss.mean() + direction_loss.mean() + value_loss.mean()
+        if loss > 1e1:
+            # round to 2 places
+            print(f"Loss is too high on batch {batch_idx},\
+                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
+            # print replay id where loss is high like this (square loss, direction loss, value loss, replay id)
+            # for each sample in the batch
+            for i in range(len(square_loss)):
+                print(
+                    f"{square_loss[i]:.2f}, {direction_loss[i]:.2f}, {value_loss[i]:.2f}, {replay_ids[i]}"
+                )
+            exit()
+
             return None
         # loss
-        self.log("value_loss", value_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("dir_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("value_loss", value_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("square_loss", square_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("dir_loss", direction_loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
         self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=3e-4)
+        return torch.optim.Adam(self.parameters(), lr=1e-4)
 
 
 class Pyramid(nn.Module):
