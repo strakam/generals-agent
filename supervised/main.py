@@ -2,27 +2,34 @@ import os
 import torch
 import lightning as L
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
-from lightning.pytorch.loggers import WandbLogger
 from network import Network
+from pytorch_lightning.loggers.neptune import NeptuneLogger
 
 torch.manual_seed(0)
 
-wandb_logger = WandbLogger(project="imu-agent")
+key_file = open("neptune_token.txt", "r")
+key = key_file.read()
+neptune_logger = NeptuneLogger(
+    api_key=key,
+    project="strakam/supervised-agent",
+)
 
 
-replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
+replays = [
+    f"all_replays/new_value/{name}" for name in os.listdir("all_replays/new_value/")
+]
 
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(replays),
     batch_size=32,
-    num_workers=8,
+    num_workers=1,
     worker_init_fn=per_worker_init_fn,
     collate_fn=collate_fn,
 )
 
 network = Network(input_dims=(55, 24, 24))
 
-trainer = L.Trainer(logger=wandb_logger)
+trainer = L.Trainer(logger=neptune_logger)
 # trainer = L.Trainer()
 trainer.fit(network, train_dataloaders=dataloader)
 

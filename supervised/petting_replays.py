@@ -72,6 +72,9 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         height = game["mapHeight"]
 
         player_moves = [{}, {}]
+        player_values = [0, 0]
+        player_values[game["winner"]] = 1 # for value function
+
         for move in game["moves"]:
             index, i, j, is50, turn = move[0], move[1], move[2], move[3], move[4]
             i, j = divmod(move[1], width)
@@ -117,6 +120,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         return (
             map_str,
             player_moves,
+            player_values,
         )
 
     def reset(
@@ -126,7 +130,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
             options = {}
         self.agents = deepcopy(self.possible_agents)
 
-        grid_string, player_moves = self.next_replay()
+        grid_string, player_moves, player_values = self.next_replay()
 
         grid = self.grid_factory.grid_from_string(grid_string)
 
@@ -134,8 +138,8 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         self.time = 0
 
         player_bases = {
-            self.agents[0]: self.game.general_positions[self.agents[0]],
-            self.agents[1]: self.game.general_positions[self.agents[1]],
+            0: self.game.general_positions[self.agents[0]],
+            1: self.game.general_positions[self.agents[1]],
         }
 
         if self.render_mode == "human":
@@ -165,7 +169,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
             for agent in self.agents
         ]
         observations = self.prepare_observations(observations)
-        return observations, player_moves, player_bases
+        return observations, player_moves, player_bases, player_values
 
     def prepare_observations(self, observations):
         # 40 (history) + 15 classic

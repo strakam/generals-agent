@@ -19,10 +19,11 @@ class Network(L.LightningModule):
 
         self.value_head = nn.Sequential(
             Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=3),
+            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
+            nn.Sigmoid(),
         )
 
         self.square_head = nn.Sequential(
@@ -52,7 +53,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        # value = self.value_head(x)
+        value = self.value_head(x)
 
         square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
         square_logits = self.square_head(x)
@@ -77,20 +78,20 @@ class Network(L.LightningModule):
         # take argmax
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return None, square_logits, direction
+        return value, square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, target = batch
-        target_i = target[:, 1]
-        target_j = target[:, 2]
+        obs, mask, values, actions = batch
+        target_i = actions[:, 1]
+        target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
 
-        _, square, direction = self(obs, mask, target_cell)
+        value, square, direction = self(obs, mask, target_cell)
 
         pred_squares = square.argmax(1)
         pred_directions = direction.argmax(1)
         squares_predicted = (pred_squares == target_cell).float()
-        direction_predicted = (pred_directions == target[:, 3]).float()
+        direction_predicted = (pred_directions == actions[:, 3]).float()
         accuracy = (squares_predicted * direction_predicted).sum() / len(
             squares_predicted
         )
@@ -98,10 +99,12 @@ class Network(L.LightningModule):
 
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
-        direction_loss = F.cross_entropy(direction, target[:, 3])
+        direction_loss = F.cross_entropy(direction, actions[:, 3])
+        value_loss = F.mse_loss(value.flatten(), values)
 
-        loss = square_loss + direction_loss
-
+        loss = square_loss + direction_loss + value_loss
+        # loss
+        self.log("value_loss", value_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
