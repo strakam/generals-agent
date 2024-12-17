@@ -14,13 +14,15 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.env = None
 
     def reset_players(self):
-        obs, moves, bases, values = self.env.reset()
+        obs, moves, bases, values, replay = self.env.reset()
         self.A.replay_moves = moves[0]
         self.B.replay_moves = moves[1]
         self.A.general_position = bases[0]
         self.B.general_position = bases[1]
         self.A.value = values[0]
         self.B.value = values[1]
+        self.A.replay = replay
+        self.B.replay = replay
 
         return obs
 
@@ -29,7 +31,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
-            yield (obs[a], self.A.value, actions[a])
+            yield (obs[a], self.A.value, actions[a], self.A.replay)
             # yield (obs[b], actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
 
@@ -64,4 +66,5 @@ def collate_fn(batch):
     masks = torch.from_numpy(np.array([b[0][1] for b in batch])).float()
     values = torch.from_numpy(np.array([b[1] for b in batch])).float()
     actions = torch.from_numpy(np.array([b[2] for b in batch]))
-    return observations, masks, values, actions
+    replay_ids = [b[3] for b in batch]
+    return observations, masks, values, actions, replay_ids

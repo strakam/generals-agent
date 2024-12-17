@@ -3,16 +3,15 @@ import torch
 import lightning as L
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from network import Network
-from pytorch_lightning.loggers.neptune import NeptuneLogger
 
 torch.manual_seed(0)
 
 key_file = open("neptune_token.txt", "r")
 key = key_file.read()
-neptune_logger = NeptuneLogger(
-    api_key=key,
-    project="strakam/supervised-agent",
-)
+# neptune_logger = NeptuneLogger(
+#     api_key=key,
+#     project="strakam/supervised-agent",
+# )
 
 
 replays = [
@@ -22,14 +21,18 @@ replays = [
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(replays),
     batch_size=32,
-    num_workers=1,
+    num_workers=12,
     worker_init_fn=per_worker_init_fn,
     collate_fn=collate_fn,
 )
 
 network = Network(input_dims=(55, 24, 24))
 
-trainer = L.Trainer(logger=neptune_logger)
+trainer = L.Trainer(
+    log_every_n_steps=20,
+    gradient_clip_val=5.0,
+    gradient_clip_algorithm="norm",
+)
 # trainer = L.Trainer()
 trainer.fit(network, train_dataloaders=dataloader)
 
