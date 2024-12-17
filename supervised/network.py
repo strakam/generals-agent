@@ -46,7 +46,7 @@ class Network(L.LightningModule):
         obs[:, 12, :, :] = obs[:, 12, :, :] / army_normalize
         obs[:, 9, :, :] = obs[:, 9, :, :] / land_normalize
         obs[:, 11, :, :] = obs[:, 11, :, :] / land_normalize
-        obs[:, 13, :, :] = obs[:, 13, :, :] / timestep_normalize
+        obs[:, 13, :, :] = (25 - obs[:, 13, :, :] % 25) / timestep_normalize
         obs[:, 15:, :, :] = obs[:, 15:, :, :] / army_normalize
         return obs
 
