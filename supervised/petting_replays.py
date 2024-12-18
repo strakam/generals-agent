@@ -65,6 +65,12 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         if self.render_mode == "human":
             _ = self.gui.tick(fps=self.metadata["render_fps"])
 
+    def determine_winner(self, game) -> int:
+        if len(game["afks"]) == 0:
+            return game["moves"][-1][0]
+        else:
+            return 1 - game["afks"][0][0]
+
     def next_replay(self):
         current_replay = self.replay_files[self.replay_idx]
         game = json.load(open(current_replay, "r"))
@@ -75,7 +81,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
         player_moves = [{}, {}]
         player_values = [-1, -1]
-        player_values[game["winner"]] = 1  # for value function
+        player_values[self.determine_winner(game)] = 1
 
         for move in game["moves"]:
             index, i, j, is50, turn = move[0], move[1], move[2], move[3], move[4]
@@ -119,12 +125,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         map_str = "\n".join(["".join(row) for row in map])
         self.replay_idx += 1
         self.replay_idx %= len(self.replay_files)
-        return (
-            map_str,
-            player_moves,
-            player_values,
-            current_replay
-        )
+        return (map_str, player_moves, player_values, current_replay)
 
     def reset(
         self, seed: int | None = None, options: dict | None = None
