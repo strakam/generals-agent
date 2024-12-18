@@ -8,8 +8,8 @@ class Network(L.LightningModule):
     def __init__(
         self,
         input_dims: tuple[int, int, int] = (55, 24, 24),
-        repeats: list[int] = [2, 2, 2],
-        channel_sequence: list[int] = [256, 320, 384],
+        repeats: list[int] = [2, 2, 2, 1],
+        channel_sequence: list[int] = [256, 320, 384, 384],
         compile: bool = False,
     ):
         super().__init__()

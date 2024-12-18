@@ -7,6 +7,7 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 torch.manual_seed(0)
+torch.set_float32_matmul_precision("high")
 
 key_file = open("neptune_token.txt", "r")
 key = key_file.read()
@@ -16,12 +17,8 @@ neptune_logger = NeptuneLogger(
 )
 
 
-replays = [
-    f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")
-]
-# replays += [
-#     f"all_replays/old_value/{name}" for name in os.listdir("all_replays/old_value/")
-# ]
+replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
+replays += [f"all_replays/old/{name}" for name in os.listdir("all_replays/old/")]
 
 dataloader = torch.utils.data.DataLoader(
     ReplayDataset(replays),
@@ -31,10 +28,7 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-model = Network(input_dims=(55, 24, 24))
-# also try torch.compile(model, mode="reduce-overhead")
-# also try compiled_model = torch.compile(model, options={"shape_padding": True})
-# model = torch.compile(model)
+model = Network(input_dims=(55, 24, 24), compile=True)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath="checkpoints",
@@ -46,6 +40,7 @@ checkpoint_callback = ModelCheckpoint(
 trainer = L.Trainer(
     logger=neptune_logger,
     log_every_n_steps=10,
+    max_epochs=-1,
     gradient_clip_val=5.0,
     gradient_clip_algorithm="norm",
     callbacks=[checkpoint_callback],
