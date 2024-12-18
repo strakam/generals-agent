@@ -10,6 +10,7 @@ class Network(L.LightningModule):
         input_dims: tuple[int, int, int] = (55, 24, 24),
         repeats: list[int] = [2, 2, 2],
         channel_sequence: list[int] = [256, 320, 384],
+        compile: bool = False,
     ):
         super().__init__()
         c, h, w = input_dims
@@ -36,6 +37,13 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
+        if compile:
+            self.backbone = torch.compile(self.backbone)
+            self.value_head = torch.compile(self.value_head)
+            self.square_head = torch.compile(self.square_head)
+            self.direction_head = torch.compile(self.direction_head)
+
+    @torch.compile
     def normalize_observations(self, obs):
         timestep_normalize = 700
         army_normalize = 3000
