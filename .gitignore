@@ -5,6 +5,10 @@ __pycache__/
 supervised/all_replays/
 data_scraping/
 replays/
+supervised/lightning_logs/
+supervised/wandb/
+supervised/.neptune/
+supervised/checkpoints/
 
 # C extensions
 *.so
