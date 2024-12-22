@@ -43,7 +43,7 @@ class Network(L.LightningModule):
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
-    @torch.compile
+    # @torch.compile
     def normalize_observations(self, obs):
         timestep_normalize = 700
         army_normalize = 3000
@@ -89,7 +89,7 @@ class Network(L.LightningModule):
         return value, square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, values, actions, replay_ids = batch
+        obs, mask, values, actions = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
@@ -98,10 +98,20 @@ class Network(L.LightningModule):
 
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
+        non_reduced = F.cross_entropy(direction, actions[:, 3], reduction="none")
         direction_loss = F.cross_entropy(direction, actions[:, 3])
         value_loss = F.mse_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss + value_loss
+        if loss > 30:
+            print(f"Loss is too high on batch {batch_idx},\
+                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
+            print(direction)
+            print(actions[:, 3])
+            print(target_i)
+            print(target_j)
+            print(non_reduced)
+            exit()
         # if loss > 1e1:
         #     # round to 2 places
         #     print(f"Loss is too high on batch {batch_idx},\
