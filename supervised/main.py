@@ -1,11 +1,14 @@
 import os
 import torch
 import lightning as L
+import time
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from generals.agents import RandomAgent
 from generals import PettingZooGenerals
 from network import Network
+import tracemalloc
 
+tracemalloc.start()
 # from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
@@ -22,13 +25,30 @@ torch.set_float32_matmul_precision("high")
 
 replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
 
+dataset = ReplayDataset(replays)
 dataloader = torch.utils.data.DataLoader(
-    ReplayDataset(replays),
-    batch_size=256,
+    dataset,
+    batch_size=512,
     num_workers=12,
     worker_init_fn=per_worker_init_fn,
     collate_fn=collate_fn,
 )
+
+size = 0
+start = time.time()
+for batch in dataloader:
+    size += batch[0].shape[0]
+    print(size)
+    # print batch[0] size in MB using torch
+    if size > 40000:
+        break
+print(time.time() - start)
+snapshot = tracemalloc.take_snapshot()
+top_stats = snapshot.statistics('lineno')
+print("[ Top 10 ]")
+for stat in top_stats[:10]:
+    print(stat)
+exit()
 
 model = Network(input_dims=(55, 24, 24), compile=False)
 
