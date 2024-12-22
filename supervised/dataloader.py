@@ -26,13 +26,25 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         return obs
 
+    def check_validity(self, obs, action):
+        _, i, j, d, _ = action
+        mask = obs[1]
+        army = obs[0][i][j]
+        own = obs[5][i][j]
+        if army > 1 and own == 1 and mask[i][j][d] == 1:
+            return True
+        return False
+
+
     def __iter__(self):
         obs = self.reset_players()
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
-            yield (obs[a], self.A.value, actions[a], self.A.replay)
-            # yield (obs[b], actions[b])
+            if self.check_validity(obs[a], actions[a]):
+                yield (obs[a], self.A.value, actions[a], self.A.replay)
+            if self.check_validity(obs[b], actions[b]):
+                yield (obs[b], self.B.value, actions[b], self.B.replay)
             obs, _, terminated, truncated, _ = self.env.step(actions)
 
             self.env.render()
