@@ -26,30 +26,31 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         return obs
 
-    def check_validity(self, obs, action):
+    def check_validity(self, obs, action, replay, t):
         _, i, j, d, _ = action
         mask = obs[1]
-        army = obs[0][i][j]
-        own = obs[5][i][j]
-        if army > 1 and own == 1 and mask[i][j][d] == 1:
+        if d == 4 or mask[i][j][d] == 1:
             return True
+        print(f"Invalid move in {replay} at turn {t}: {i} {j} {d}")
         return False
-
 
     def __iter__(self):
         obs = self.reset_players()
+        t = 0
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
-            if self.check_validity(obs[a], actions[a]):
+            if self.check_validity(obs[a], actions[a], self.A.replay, t):
                 yield (obs[a], self.A.value, actions[a], self.A.replay)
-            if self.check_validity(obs[b], actions[b]):
+            if self.check_validity(obs[b], actions[b], self.B.replay, t):
                 yield (obs[b], self.B.value, actions[b], self.B.replay)
             obs, _, terminated, truncated, _ = self.env.step(actions)
 
             self.env.render()
+            t += 1
             if all(terminated.values()) or all(truncated.values()):
                 obs = self.reset_players()
+                t = 0
 
 
 def per_worker_init_fn(worker_id):

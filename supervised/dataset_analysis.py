@@ -3,17 +3,17 @@ import numpy as np
 import json
 import tqdm
 
-new_replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
-old_replays = [
-    f"all_replays/old_value/{name}" for name in os.listdir("all_replays/old_value/")
-]
-
-all_replays = new_replays + old_replays
-
 total_frames = 0
 total = []
 bins = [0] * 11
 t = 0
+
+# read all_replays/old/
+old_replays = [f"all_replays/old/{id}" for id in os.listdir("all_replays/old/")]
+new_replays = [f"all_replays/new/{id}" for id in os.listdir("all_replays/new/")]
+print("Old replays: ", len(old_replays))
+print("New replays: ", len(new_replays))
+all_replays = old_replays + new_replays
 
 for replay in tqdm.tqdm(all_replays):
     game = json.load(open(replay))
