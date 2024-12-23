@@ -15,7 +15,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         self.buffer = [
             [
-                np.empty((55, 24, 24), dtype=np.float32),
+                np.empty((25, 24, 24), dtype=np.float32),
                 np.empty((24, 24, 4), dtype=np.float32),
                 0.0,
                 np.empty(5, dtype=np.int32),
