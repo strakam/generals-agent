@@ -5,6 +5,7 @@ from typing import Any, TypeAlias
 import numpy as np
 import json
 
+from scipy.ndimage import maximum_filter  # type: ignore
 import pettingzoo  # type: ignore
 from gymnasium import spaces
 
@@ -29,7 +30,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         self,
         agents: dict[AgentID, Agent],
         replay_files: list[str],
-        history_size: int | None = 40,
+        history_size: int | None = 10,
         grid_factory: GridFactory | None = None,
         render_mode: str | None = None,
     ):
@@ -149,31 +150,39 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         if self.render_mode == "human":
             self.gui = GUI(self.game, self.agent_data, GuiMode.TRAIN)
 
-        observations = {
+        obs = {
             agent: self.game.agent_observation(agent).as_dict() for agent in self.agents
         }
 
+        obs_0 = obs[self.agents[0]]["observation"]
+        obs_1 = obs[self.agents[1]]["observation"]
+
         self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
-        self.army_stack[0, 0, :, :] = observations[self.agents[0]]["observation"][
-            "armies"
-        ]
-        self.army_stack[1, 0, :, :] = observations[self.agents[1]]["observation"][
-            "armies"
+        self.army_stack[0, 0, :, :] = obs_0["armies"]
+        self.army_stack[1, 0, :, :] = obs_1["armies"]
+
+        self.last_army = [
+            obs_0["armies"] * obs_0["owned_cells"],
+            obs_1["armies"] * obs_1["owned_cells"],
         ]
         self.cities = [
-            np.array(observations[agent]["observation"]["cities"]).astype(bool)
-            for agent in self.agents
+            np.array(obs_0["cities"]).astype(bool),
+            np.array(obs_1["cities"]).astype(bool),
         ]
         self.generals = [
-            np.array(observations[agent]["observation"]["generals"]).astype(bool)
-            for agent in self.agents
+            np.array(obs_0["generals"]).astype(bool),
+            np.array(obs_1["generals"]).astype(bool),
         ]
         self.mountains = [
-            np.array(observations[agent]["observation"]["mountains"]).astype(bool)
-            for agent in self.agents
+            np.array(obs_0["mountains"]).astype(bool),
+            np.array(obs_1["mountains"]).astype(bool),
         ]
-        observations = self.prepare_observations(observations)
-        return observations, player_moves, player_bases, player_values, replay_name
+        self.enemy_saw = [
+            np.zeros((24, 24)).astype(bool),
+            np.zeros((24, 24)).astype(bool),
+        ]
+        obs = self.prepare_observations(obs)
+        return obs, player_moves, player_bases, player_values, replay_name
 
     def prepare_observations(self, observations):
         # 40 (history) + 15 classic
@@ -182,7 +191,17 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         for i, agent in enumerate(self.agents):
             obs = observations[agent]["observation"]
             self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
-            self.army_stack[i, 0, :, :] = obs["armies"] - self.army_stack[i, 1, :, :]
+            self.army_stack[i, 0, :, :] = (
+                obs["armies"] * obs["owned_cells"]
+            ) - self.last_army[i]
+
+            self.last_army[i] = obs["armies"] * obs["owned_cells"]
+
+            self.enemy_saw[i] = np.logical_or(
+                self.enemy_saw[i],
+                maximum_filter(obs["opponent_cells"], size=3).astype(bool),
+            )
+
             self.cities[i] |= obs["cities"]
             self.generals[i] |= obs["generals"]
             self.mountains[i] |= obs["mountains"]
@@ -190,6 +209,10 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
                 np.stack(
                     [
                         obs["armies"],
+                        obs["armies"] * obs["owned_cells"],  # my armies
+                        obs["armies"] * obs["opponent_cells"],  # opponent armies
+                        obs["armies"] * obs["neutral_cells"],  # neutral armies
+                        self.enemy_saw[i],  # enemy sight
                         self.generals[i],
                         self.cities[i],
                         self.mountains[i],
@@ -198,12 +221,12 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
                         obs["opponent_cells"],
                         obs["fog_cells"],
                         obs["structures_in_fog"],
+                        obs["timestep"] * np.ones((24, 24)),
+                        obs["priority"] * np.ones((24, 24)),
                         obs["owned_land_count"] * np.ones((24, 24)),
                         obs["owned_army_count"] * np.ones((24, 24)),
                         obs["opponent_land_count"] * np.ones((24, 24)),
                         obs["opponent_army_count"] * np.ones((24, 24)),
-                        obs["timestep"] * np.ones((24, 24)),
-                        obs["priority"] * np.ones((24, 24)),
                         *self.army_stack[i],
                     ]
                 ),
