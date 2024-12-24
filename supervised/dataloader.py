@@ -15,12 +15,12 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         self.buffer = [
             [
-                np.empty((25, 24, 24), dtype=np.float32),
+                np.empty((29, 24, 24), dtype=np.float32),
                 np.empty((24, 24, 4), dtype=np.float32),
                 0.0,
                 np.empty(5, dtype=np.int32),
             ]
-            for _ in range(5_000)
+            for _ in range(5)
         ]
         self.buffer_idx = 0
         self.filled = False
@@ -55,7 +55,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         if self.buffer_idx == len(self.buffer):
             self.filled = True
             self.buffer_idx = 0
-            np.random.shuffle(self.buffer)
+            # np.random.shuffle(self.buffer)
 
     def __iter__(self):
         obs = self.reset_players()
@@ -63,14 +63,16 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
             if self.check_validity(obs[a], actions[a]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs[a], self.A.value, actions[a])
-
-            if self.check_validity(obs[b], actions[b]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs[b], self.B.value, actions[b])
+                print(self.A.replay)
+                yield obs[a][0], obs[a][1], self.A.value, actions[a]
+            #     if self.filled:
+            #         yield self.buffer[self.buffer_idx]
+            #     self.save_sample(obs[a], self.A.value, actions[a])
+            #
+            # if self.check_validity(obs[b], actions[b]):
+            #     if self.filled:
+            #         yield self.buffer[self.buffer_idx]
+            #     self.save_sample(obs[b], self.B.value, actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
             if all(terminated.values()) or all(truncated.values()):
                 obs = self.reset_players()
