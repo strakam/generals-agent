@@ -62,9 +62,11 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         while True:
             a, b = self.A.id, self.B.id
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
-            if self.check_validity(obs[a], actions[a]):
+            obs_a = self.A.last_observation
+            obs_b = self.B.last_observation
+            if self.check_validity(obs_a, actions[a]):
                 print(self.A.replay)
-                yield obs[a][0], obs[a][1], self.A.value, actions[a]
+                yield obs_a[0], obs_a[1], self.A.value, actions[a]
             #     if self.filled:
             #         yield self.buffer[self.buffer_idx]
             #     self.save_sample(obs[a], self.A.value, actions[a])

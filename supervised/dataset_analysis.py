@@ -8,6 +8,7 @@ total = []
 bins = [0] * 11
 both = [0, 0, 0]
 high_elo_frames = 0
+highest_elo_reps = []
 
 # read all_replays/old/
 old_replays = [f"all_replays/old/{id}" for id in os.listdir("all_replays/old/")]
@@ -23,18 +24,19 @@ for replay in tqdm.tqdm(all_replays):
     stars = game["stars"]
     total.append(frames)
     if stars[0] > 50 and stars[1] > 50:
-        high_elo_frames += frames
         both[0] += 1
-        json.dump(game, open(f"high_elo_replays/{id}", "w"))
     if stars[0] > 60 and stars[1] > 60:
         both[1] += 1
     if stars[0] > 70 and stars[1] > 70:
+        high_elo_frames += frames
+        highest_elo_reps.append(id)
         both[2] += 1
     bins[frames // 100] += 1
     total_frames += frames
 
 total = np.array(total)
 print("Both: ", both)
+print("Highest elo reps: ", highest_elo_reps[:10])
 print("High elo frames: ", high_elo_frames)
 print(
     len(total),

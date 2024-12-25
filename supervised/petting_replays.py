@@ -2,16 +2,14 @@ import functools
 from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeAlias
-import numpy as np
 import json
 
-from scipy.ndimage import maximum_filter  # type: ignore
 import pettingzoo  # type: ignore
 from gymnasium import spaces
 
 from generals.agents.agent import Agent
 from generals.core.game import Game, Info, Observation
-from generals.core.action import Action, compute_valid_action_mask
+from generals.core.action import Action
 from generals.core.grid import GridFactory, Grid
 from generals.gui import GUI
 from generals.gui.properties import GuiMode
@@ -152,86 +150,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
             self.gui = GUI(self.game, self.agent_data, GuiMode.TRAIN)
 
         obs = {agent: self.game.agent_observation(agent) for agent in self.agents}
-
-        obs_0 = obs[self.agents[0]]
-        obs_1 = obs[self.agents[1]]
-
-        self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
-        self.army_stack[0, 0, :, :] = obs_0["armies"]
-        self.army_stack[1, 0, :, :] = obs_1["armies"]
-
-        self.last_army = [
-            obs_0["armies"] * obs_0["owned_cells"],
-            obs_1["armies"] * obs_1["owned_cells"],
-        ]
-        self.cities = [
-            np.array(obs_0["cities"]).astype(bool),
-            np.array(obs_1["cities"]).astype(bool),
-        ]
-        self.generals = [
-            np.array(obs_0["generals"]).astype(bool),
-            np.array(obs_1["generals"]).astype(bool),
-        ]
-        self.mountains = [
-            np.array(obs_0["mountains"]).astype(bool),
-            np.array(obs_1["mountains"]).astype(bool),
-        ]
-        self.enemy_saw = [
-            np.zeros((24, 24)).astype(bool),
-            np.zeros((24, 24)).astype(bool),
-        ]
-        obs = self.prepare_observations(obs)
         return obs, player_moves, player_bases, player_values, replay_name
-
-    def prepare_observations(self, observations):
-        # 40 (history) + 15 classic
-        # update history stack
-        _obs = {}
-        for i, agent in enumerate(self.agents):
-            obs = observations[agent]
-            self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
-            self.army_stack[i, 0, :, :] = (
-                obs["armies"] * obs["owned_cells"]
-            ) - self.last_army[i]
-
-            self.last_army[i] = obs["armies"] * obs["owned_cells"]
-
-            self.enemy_saw[i] = np.logical_or(
-                self.enemy_saw[i],
-                maximum_filter(obs["opponent_cells"], size=3).astype(bool),
-            )
-
-            self.cities[i] |= obs["cities"]
-            self.generals[i] |= obs["generals"]
-            self.mountains[i] |= obs["mountains"]
-            _obs[agent] = (
-                np.stack(
-                    [
-                        obs["armies"],
-                        obs["armies"] * obs["owned_cells"],  # my armies
-                        obs["armies"] * obs["opponent_cells"],  # opponent armies
-                        obs["armies"] * obs["neutral_cells"],  # neutral armies
-                        self.enemy_saw[i],  # enemy sight
-                        self.generals[i],
-                        self.cities[i],
-                        self.mountains[i],
-                        obs["neutral_cells"],
-                        obs["owned_cells"],
-                        obs["opponent_cells"],
-                        obs["fog_cells"],
-                        obs["structures_in_fog"],
-                        obs["timestep"] * np.ones((24, 24)),
-                        obs["priority"] * np.ones((24, 24)),
-                        obs["owned_land_count"] * np.ones((24, 24)),
-                        obs["owned_army_count"] * np.ones((24, 24)),
-                        obs["opponent_land_count"] * np.ones((24, 24)),
-                        obs["opponent_army_count"] * np.ones((24, 24)),
-                        *self.army_stack[i],
-                    ]
-                ),
-                compute_valid_action_mask(obs),
-            )
-        return _obs
 
     def step(
         self, actions: dict[AgentID, Action]
@@ -246,7 +165,6 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         observations = {
             agent: observation for agent, observation in observations.items()
         }
-        observations = self.prepare_observations(observations)
         # You probably want to set your truncation based on self.game.time
         truncated = {
             agent: True if self.time > self.game_length else False
