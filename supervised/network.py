@@ -7,7 +7,7 @@ import lightning as L
 class Network(L.LightningModule):
     def __init__(
         self,
-        input_dims: tuple[int, int, int] = (55, 24, 24),
+        input_dims: tuple[int, int, int] = (29, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
         compile: bool = False,
@@ -24,7 +24,6 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
-            nn.Tanh(),
         )
 
         self.square_head = nn.Sequential(
@@ -49,13 +48,13 @@ class Network(L.LightningModule):
         army_normalize = 3000
         land_normalize = 24 * 24
 
-        obs[:, 0, :, :] = obs[:, 0, :, :] / army_normalize
-        obs[:, 10, :, :] = obs[:, 10, :, :] / army_normalize
-        obs[:, 12, :, :] = obs[:, 12, :, :] / army_normalize
-        obs[:, 9, :, :] = obs[:, 9, :, :] / land_normalize
-        obs[:, 11, :, :] = obs[:, 11, :, :] / land_normalize
+        obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
+        obs[:, 16, :, :] = obs[:, 16, :, :] / army_normalize
+        obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
+        obs[:, 15, :, :] = obs[:, 15, :, :] / land_normalize
+        obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
         obs[:, 13, :, :] = (25 - obs[:, 13, :, :] % 25) / timestep_normalize
-        obs[:, 15:, :, :] = obs[:, 15:, :, :] / army_normalize
+        obs[:, 19:, :, :] = obs[:, 19:, :, :] / army_normalize
         return obs
 
     def forward(self, obs, mask, teacher_cells=None):
@@ -63,7 +62,7 @@ class Network(L.LightningModule):
         x = self.backbone(obs)
         value = self.value_head(x)
 
-        square_mask = (1 - obs[:, 5, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
+        square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
         square_logits = self.square_head(x)
         square_logits = (square_logits + square_mask).flatten(1)
 
@@ -83,6 +82,7 @@ class Network(L.LightningModule):
         representation_with_square = torch.cat((x, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
+
         # take argmax
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
@@ -98,19 +98,19 @@ class Network(L.LightningModule):
 
         # crossentropy loss for square loss and direction loss
         square_loss = F.cross_entropy(square, target_cell.long())
-        non_reduced = F.cross_entropy(direction, actions[:, 3], reduction="none")
         direction_loss = F.cross_entropy(direction, actions[:, 3])
         value_loss = F.mse_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss + value_loss
         if loss > 30:
-            print(f"Loss is too high on batch {batch_idx},\
-                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
+            print(
+                f"Loss is too high on batch {batch_idx},\
+                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
+            )
             print(direction)
             print(actions[:, 3])
             print(target_i)
             print(target_j)
-            print(non_reduced)
             exit()
         # if loss > 1e1:
         #     # round to 2 places

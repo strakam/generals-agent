@@ -5,6 +5,7 @@ from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from generals.agents import RandomAgent
 from generals import PettingZooGenerals
 from network import Network
+from tensor_vis import visualize_tensor
 
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -25,13 +26,13 @@ replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
 dataset = ReplayDataset(replays)
 dataloader = torch.utils.data.DataLoader(
     dataset,
-    batch_size=768,
-    num_workers=32,
+    batch_size=16,
+    num_workers=1,
     worker_init_fn=per_worker_init_fn,
     collate_fn=collate_fn,
 )
 
-model = Network(input_dims=(55, 24, 24), compile=True)
+model = Network(input_dims=(29, 24, 24), compile=False)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath="checkpoints",

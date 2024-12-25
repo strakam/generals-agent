@@ -1,4 +1,5 @@
 from petting_replays import PettingZooGenerals
+from generals.core.action import compute_valid_action_mask
 from replay_agent import ReplayAgent
 import torch
 import math
@@ -38,9 +39,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         return obs
 
-    def check_validity(self, obs, action):
+    def check_validity(self, mask, action):
         _, i, j, d, _ = action
-        mask = obs[1]
         if d == 4 or mask[i][j][d] == 1:
             return True
         return False
@@ -64,9 +64,10 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
             obs_a = self.A.last_observation
             obs_b = self.B.last_observation
-            if self.check_validity(obs_a, actions[a]):
-                print(self.A.replay)
-                yield obs_a[0], obs_a[1], self.A.value, actions[a]
+            mask_a = compute_valid_action_mask(obs[a])
+            mask_b = compute_valid_action_mask(obs[b])
+            if self.check_validity(mask_a, actions[a]):
+                yield obs_a, mask_a, self.A.value, actions[a]
             #     if self.filled:
             #         yield self.buffer[self.buffer_idx]
             #     self.save_sample(obs[a], self.A.value, actions[a])

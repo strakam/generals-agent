@@ -22,9 +22,9 @@ class ReplayAgent(Agent):
 
         self.army_stack = np.zeros((self.history_size, 24, 24))
         self.army_stack[0, :, :] = np.zeros((24, 24)).astype(bool)
-        self.last_army = np.zeros((24, 24)).astype(bool)
         self.cities = np.zeros((24, 24)).astype(bool)
         self.generals = np.zeros((24, 24)).astype(bool)
+        self.last_army = np.zeros((24, 24)).astype(bool)
         self.mountains = np.zeros((24, 24)).astype(bool)
         self.enemy_saw = np.zeros((24, 24)).astype(bool)
 
