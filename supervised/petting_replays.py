@@ -10,8 +10,9 @@ import pettingzoo  # type: ignore
 from gymnasium import spaces
 
 from generals.agents.agent import Agent
-from generals.core.game import Action, Game, Info, Observation
-from generals.core.grid import GridFactory
+from generals.core.game import Game, Info, Observation
+from generals.core.action import Action, compute_valid_action_mask
+from generals.core.grid import GridFactory, Grid
 from generals.gui import GUI
 from generals.gui.properties import GuiMode
 
@@ -137,7 +138,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
 
         grid_string, player_moves, player_values, replay_name = self.next_replay()
 
-        grid = self.grid_factory.grid_from_string(grid_string)
+        grid = Grid(grid_string)
 
         self.game = Game(grid, self.agents)
         self.time = 0
@@ -150,12 +151,10 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         if self.render_mode == "human":
             self.gui = GUI(self.game, self.agent_data, GuiMode.TRAIN)
 
-        obs = {
-            agent: self.game.agent_observation(agent).as_dict() for agent in self.agents
-        }
+        obs = {agent: self.game.agent_observation(agent) for agent in self.agents}
 
-        obs_0 = obs[self.agents[0]]["observation"]
-        obs_1 = obs[self.agents[1]]["observation"]
+        obs_0 = obs[self.agents[0]]
+        obs_1 = obs[self.agents[1]]
 
         self.army_stack = np.zeros(shape=(2, self.history_size, 24, 24))
         self.army_stack[0, 0, :, :] = obs_0["armies"]
@@ -189,7 +188,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
         # update history stack
         _obs = {}
         for i, agent in enumerate(self.agents):
-            obs = observations[agent]["observation"]
+            obs = observations[agent]
             self.army_stack[i, 1:, :, :] = self.army_stack[i, :-1, :, :]
             self.army_stack[i, 0, :, :] = (
                 obs["armies"] * obs["owned_cells"]
@@ -230,7 +229,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
                         *self.army_stack[i],
                     ]
                 ),
-                observations[agent]["action_mask"],
+                compute_valid_action_mask(obs),
             )
         return _obs
 
@@ -245,7 +244,7 @@ class PettingZooGenerals(pettingzoo.ParallelEnv):
     ]:
         observations, infos = self.game.step(actions)
         observations = {
-            agent: observation.as_dict() for agent, observation in observations.items()
+            agent: observation for agent, observation in observations.items()
         }
         observations = self.prepare_observations(observations)
         # You probably want to set your truncation based on self.game.time
