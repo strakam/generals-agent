@@ -78,11 +78,10 @@ class NeuroAgent(Agent):
         Randomly selects a valid action.
         """
         time = int(observation[0][13][0][0])
+        self.last_observation = self.augment_observation(observation)
 
         if time not in self.replay_moves:
             return [1, self.general_position[0], self.general_position[1], 4, 0]
-
-        self.last_observation = self.augment_observation(observation)
 
         return self.replay_moves[time]
 

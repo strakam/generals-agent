@@ -1,6 +1,5 @@
 import numpy as np
 from generals.core.game import Action
-from generals.core.action import compute_valid_action_mask
 from scipy.ndimage import maximum_filter
 from generals.core.observation import Observation
 
@@ -45,32 +44,29 @@ class ReplayAgent(Agent):
         self.cities |= obs["cities"]
         self.generals |= obs["generals"]
         self.mountains |= obs["mountains"]
-        return (
-            np.stack(
-                [
-                    obs["armies"],
-                    obs["armies"] * obs["owned_cells"],  # my armies
-                    obs["armies"] * obs["opponent_cells"],  # opponent armies
-                    obs["armies"] * obs["neutral_cells"],  # neutral armies
-                    self.enemy_saw,  # enemy sight
-                    self.generals,
-                    self.cities,
-                    self.mountains,
-                    obs["neutral_cells"],
-                    obs["owned_cells"],
-                    obs["opponent_cells"],
-                    obs["fog_cells"],
-                    obs["structures_in_fog"],
-                    obs["timestep"] * np.ones((24, 24)),
-                    obs["priority"] * np.ones((24, 24)),
-                    obs["owned_land_count"] * np.ones((24, 24)),
-                    obs["owned_army_count"] * np.ones((24, 24)),
-                    obs["opponent_land_count"] * np.ones((24, 24)),
-                    obs["opponent_army_count"] * np.ones((24, 24)),
-                    *self.army_stack,
-                ]
-            ),
-            compute_valid_action_mask(obs),
+        return np.stack(
+            [
+                obs["armies"],
+                obs["armies"] * obs["owned_cells"],  # my armies
+                obs["armies"] * obs["opponent_cells"],  # opponent armies
+                obs["armies"] * obs["neutral_cells"],  # neutral armies
+                self.enemy_saw,  # enemy sight
+                self.generals,
+                self.cities,
+                self.mountains,
+                obs["neutral_cells"],
+                obs["owned_cells"],
+                obs["opponent_cells"],
+                obs["fog_cells"],
+                obs["structures_in_fog"],
+                obs["timestep"] * np.ones((24, 24)),
+                obs["priority"] * np.ones((24, 24)),
+                obs["owned_land_count"] * np.ones((24, 24)),
+                obs["owned_army_count"] * np.ones((24, 24)),
+                obs["opponent_land_count"] * np.ones((24, 24)),
+                obs["opponent_army_count"] * np.ones((24, 24)),
+                *self.army_stack,
+            ]
         )
 
     def act(self, observation: Observation) -> Action:
@@ -78,7 +74,6 @@ class ReplayAgent(Agent):
         Randomly selects a valid action.
         """
         time = observation["timestep"]
-        print(time)
 
         if time not in self.replay_moves:
             return [1, self.general_position[0], self.general_position[1], 4, 0]

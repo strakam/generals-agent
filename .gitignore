@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 supervised/all_replays/
 data_scraping/
+supervised/high_elo_replays/
 replays/
 supervised/lightning_logs/
 supervised/wandb/
