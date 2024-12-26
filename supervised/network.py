@@ -75,6 +75,10 @@ class Network(L.LightningModule):
         )
 
         mask = 1 - mask.permute(0, 3, 1, 2)
+        # pad spatial dimension of mask to 24x24, with value 1
+        pad_h = 24 - mask.shape[2]
+        pad_w = 24 - mask.shape[3]
+        mask = F.pad(mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
         zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
         direction_mask = torch.cat((mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
@@ -107,6 +111,7 @@ class Network(L.LightningModule):
                 f"Loss is too high on batch {batch_idx},\
                 s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
             )
+            # get index where loss is high
             print(direction)
             print(actions[:, 3])
             print(target_i)

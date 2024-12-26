@@ -1,15 +1,16 @@
 import numpy as np
 from generals.core.game import Action
+import lightning as L
 from generals.core.action import compute_valid_action_mask
 from scipy.ndimage import maximum_filter
 from generals.core.observation import Observation
-
 from generals.agents import Agent
 
 
 class NeuroAgent(Agent):
     def __init__(
         self,
+        network: L.LightningModule,
         id: str = "19108",
         color: tuple[int, int, int] = (242, 61, 106),
         replay_moves: dict[int, list[int]] | None = None,
@@ -17,6 +18,8 @@ class NeuroAgent(Agent):
         history_size: int | None = 10,
     ):
         super().__init__(id, color)
+        self.network = network
+
         self.replay_moves = replay_moves
         self.general_position = general_position
         self.history_size = history_size
@@ -32,6 +35,14 @@ class NeuroAgent(Agent):
         self.last_observation = np.zeros((29, 24, 24))
 
     def augment_observation(self, obs: Observation) -> np.ndarray:
+        for k, channel in obs.items():
+            pad_h = (0, 24 - channel.shape[0])
+            pad_w = (0, 24 - channel.shape[1])
+            if k == "mountains":
+                obs[k] = np.pad(channel, pad_h, pad_w, constant_values=1)
+            else:
+                obs[k] = np.pad(channel, pad_h, pad_w)
+
         self.army_stack[1:, :, :] = self.army_stack[:-1, :, :]
         self.army_stack[0, :, :] = (obs["armies"] * obs["owned_cells"]) - self.last_army
 
@@ -45,32 +56,29 @@ class NeuroAgent(Agent):
         self.cities |= obs["cities"]
         self.generals |= obs["generals"]
         self.mountains |= obs["mountains"]
-        return (
-            np.stack(
-                [
-                    obs["armies"],
-                    obs["armies"] * obs["owned_cells"],  # my armies
-                    obs["armies"] * obs["opponent_cells"],  # opponent armies
-                    obs["armies"] * obs["neutral_cells"],  # neutral armies
-                    self.enemy_saw,  # enemy sight
-                    self.generals,
-                    self.cities,
-                    self.mountains,
-                    obs["neutral_cells"],
-                    obs["owned_cells"],
-                    obs["opponent_cells"],
-                    obs["fog_cells"],
-                    obs["structures_in_fog"],
-                    obs["timestep"] * np.ones((24, 24)),
-                    obs["priority"] * np.ones((24, 24)),
-                    obs["owned_land_count"] * np.ones((24, 24)),
-                    obs["owned_army_count"] * np.ones((24, 24)),
-                    obs["opponent_land_count"] * np.ones((24, 24)),
-                    obs["opponent_army_count"] * np.ones((24, 24)),
-                    *self.army_stack,
-                ]
-            ),
-            compute_valid_action_mask(obs),
+        return np.stack(
+            [
+                obs["armies"],
+                obs["armies"] * obs["owned_cells"],  # my armies
+                obs["armies"] * obs["opponent_cells"],  # opponent armies
+                obs["armies"] * obs["neutral_cells"],  # neutral armies
+                self.enemy_saw,  # enemy sight
+                self.generals,
+                self.cities,
+                self.mountains,
+                obs["neutral_cells"],
+                obs["owned_cells"],
+                obs["opponent_cells"],
+                obs["fog_cells"],
+                obs["structures_in_fog"],
+                obs["timestep"] * np.ones((24, 24)),
+                obs["priority"] * np.ones((24, 24)),
+                obs["owned_land_count"] * np.ones((24, 24)),
+                obs["owned_army_count"] * np.ones((24, 24)),
+                obs["opponent_land_count"] * np.ones((24, 24)),
+                obs["opponent_army_count"] * np.ones((24, 24)),
+                *self.army_stack,
+            ]
         )
 
     def act(self, observation: Observation) -> Action:
@@ -79,6 +87,10 @@ class NeuroAgent(Agent):
         """
         time = int(observation[0][13][0][0])
         self.last_observation = self.augment_observation(observation)
+        mask = compute_valid_action_mask(observation)
+
+        v, s, d = self.network(self.last_observation, mask)
+        print(v, s, d)
 
         if time not in self.replay_moves:
             return [1, self.general_position[0], self.general_position[1], 4, 0]

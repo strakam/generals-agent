@@ -21,7 +21,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 0.0,
                 np.empty(5, dtype=np.int32),
             ]
-            for _ in range(5)
+            for _ in range(50)
         ]
         self.buffer_idx = 0
         self.filled = False
@@ -39,16 +39,16 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         return obs
 
-    def check_validity(self, mask, action):
+    def check_validity(self, mask, own, action):
         _, i, j, d, _ = action
         if d == 4 or mask[i][j][d] == 1:
+            assert own[i][j] == 1, "Invalid action"
             return True
         return False
 
-    def save_sample(self, obs, value, action):
-        _obs, _mask = obs
-        self.buffer[self.buffer_idx][0][:] = _obs
-        self.buffer[self.buffer_idx][1][:] = _mask
+    def save_sample(self, obs, mask, value, action):
+        self.buffer[self.buffer_idx][0][:] = obs
+        self.buffer[self.buffer_idx][1][:] = mask
         self.buffer[self.buffer_idx][2] = value
         self.buffer[self.buffer_idx][3][:] = action
         self.buffer_idx += 1
@@ -66,16 +66,16 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             obs_b = self.B.last_observation
             mask_a = compute_valid_action_mask(obs[a])
             mask_b = compute_valid_action_mask(obs[b])
-            if self.check_validity(mask_a, actions[a]):
+            if self.check_validity(mask_a, self.A.last_observation[9], actions[a]):
                 yield obs_a, mask_a, self.A.value, actions[a]
-            #     if self.filled:
-            #         yield self.buffer[self.buffer_idx]
-            #     self.save_sample(obs[a], self.A.value, actions[a])
-            #
-            # if self.check_validity(obs[b], actions[b]):
-            #     if self.filled:
-            #         yield self.buffer[self.buffer_idx]
-            #     self.save_sample(obs[b], self.B.value, actions[b])
+                if self.filled:
+                    yield self.buffer[self.buffer_idx]
+                self.save_sample(obs_a, mask_a, self.A.value, actions[a])
+
+            if self.check_validity(mask_b, self.B.last_observation[9], actions[b]):
+                if self.filled:
+                    yield self.buffer[self.buffer_idx]
+                self.save_sample(obs_b, mask_b, self.B.value, actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
             if all(terminated.values()) or all(truncated.values()):
                 obs = self.reset_players()

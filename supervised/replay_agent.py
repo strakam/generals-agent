@@ -31,6 +31,17 @@ class ReplayAgent(Agent):
         self.last_observation = np.zeros((29, 24, 24))
 
     def augment_observation(self, obs: Observation) -> np.ndarray:
+        _obs = {}
+        for k, channel in obs.items():
+            if type(channel) is np.ndarray:
+                pad_value = int(k == "mountains")
+                pad_h = (0, 24 - channel.shape[0])
+                pad_w = (0, 24 - channel.shape[1])
+                _obs[k] = np.pad(channel, (pad_h, pad_w), constant_values=pad_value)
+            else:
+                _obs[k] = np.full((24, 24), channel)
+        obs = _obs
+
         self.army_stack[1:, :, :] = self.army_stack[:-1, :, :]
         self.army_stack[0, :, :] = (obs["armies"] * obs["owned_cells"]) - self.last_army
 
@@ -75,10 +86,9 @@ class ReplayAgent(Agent):
         """
         time = observation["timestep"]
 
+        self.last_observation = self.augment_observation(observation)
         if time not in self.replay_moves:
             return [1, self.general_position[0], self.general_position[1], 4, 0]
-
-        self.last_observation = self.augment_observation(observation)
 
         return self.replay_moves[time]
 

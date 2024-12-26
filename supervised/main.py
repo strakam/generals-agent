@@ -5,7 +5,7 @@ from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from generals.agents import RandomAgent
 from generals import PettingZooGenerals
 from network import Network
-from tensor_vis import visualize_tensor
+# from tensor_vis import visualize_tensor
 
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
