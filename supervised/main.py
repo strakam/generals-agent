@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 BUFFER_SIZE = 8000
 LEARNING_RATE = 5e-4
 N_CHANNELS = 29
-BATCH_SIZE = 1024
+BATCH_SIZE = 1280
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 10
 EVAL_INTERVAL = 5000
