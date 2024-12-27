@@ -7,6 +7,7 @@ import lightning as L
 class Network(L.LightningModule):
     def __init__(
         self,
+        learning_rate: float = 1e-4,
         input_dims: tuple[int, int, int] = (29, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
@@ -14,6 +15,7 @@ class Network(L.LightningModule):
     ):
         super().__init__()
         c, h, w = input_dims
+        self.lr = learning_rate
 
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -139,7 +141,8 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 
 class Pyramid(nn.Module):

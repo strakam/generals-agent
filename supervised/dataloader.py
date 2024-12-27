@@ -9,7 +9,7 @@ import numpy as np
 
 
 class ReplayDataset(torch.utils.data.IterableDataset):
-    def __init__(self, replay_files: list[str], buffer_size: int = 50):
+    def __init__(self, replay_files: list[str], buffer_size: int = 1000):
         self.replay_files = replay_files
         self.replays = None
         self.env = None
@@ -43,7 +43,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         if self.buffer_idx == len(self.buffer):
             self.filled = True
             self.buffer_idx = 0
-            # np.random.shuffle(self.buffer)
+            np.random.shuffle(self.buffer)
 
     def teacher_action(self, moves, base, timestep):
         if timestep in moves:
@@ -79,8 +79,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 self.save_sample(obs_b, mask_b, values[1], actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
             if all(terminated.values()) or all(truncated.values()):
-                map, moves, values = self.get_new_replay()
-                obs, bases = self.env.reset(options={"grid": map})
+                map, moves, values, bases = self.get_new_replay()
+                obs, _ = self.env.reset(options={"grid": map})
 
     def get_new_replay(self):
         game = json.load(open(self.replays[self.replay_idx], "r"))
@@ -142,7 +142,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         map_str = "\n".join(["".join(row) for row in map])
         self.replay_idx += 1
-        self.replay_idx %= len(self.replay_files)
+        self.replay_idx %= len(self.replays)
         return (map_str, player_moves, player_values, player_bases)
 
 

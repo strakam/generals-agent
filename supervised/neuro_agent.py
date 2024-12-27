@@ -1,7 +1,8 @@
+import torch
 import numpy as np
 from generals.core.game import Action
 import lightning as L
-from generals.core.action import compute_valid_action_mask
+from generals.core.action import compute_valid_move_mask
 from scipy.ndimage import maximum_filter
 from generals.core.observation import Observation
 from generals.agents import Agent
@@ -11,7 +12,7 @@ class NeuroAgent(Agent):
     def __init__(
         self,
         network: L.LightningModule,
-        id: str = "19108",
+        id: str = "Neuro",
         color: tuple[int, int, int] = (242, 61, 106),
         replay_moves: dict[int, list[int]] | None = None,
         general_position: tuple[int, int] | None = None,
@@ -35,13 +36,16 @@ class NeuroAgent(Agent):
         self.last_observation = np.zeros((29, 24, 24))
 
     def augment_observation(self, obs: Observation) -> np.ndarray:
+        _obs = {}
         for k, channel in obs.items():
-            pad_h = (0, 24 - channel.shape[0])
-            pad_w = (0, 24 - channel.shape[1])
-            if k == "mountains":
-                obs[k] = np.pad(channel, pad_h, pad_w, constant_values=1)
+            if type(channel) is np.ndarray:
+                pad_value = int(k == "mountains")
+                pad_h = (0, 24 - channel.shape[0])
+                pad_w = (0, 24 - channel.shape[1])
+                _obs[k] = np.pad(channel, (pad_h, pad_w), constant_values=pad_value)
             else:
-                obs[k] = np.pad(channel, pad_h, pad_w)
+                _obs[k] = np.full((24, 24), channel)
+        obs = _obs
 
         self.army_stack[1:, :, :] = self.army_stack[:-1, :, :]
         self.army_stack[0, :, :] = (obs["armies"] * obs["owned_cells"]) - self.last_army
@@ -85,17 +89,24 @@ class NeuroAgent(Agent):
         """
         Randomly selects a valid action.
         """
-        time = int(observation[0][13][0][0])
         self.last_observation = self.augment_observation(observation)
-        mask = compute_valid_action_mask(observation)
+        mask = compute_valid_move_mask(observation)
+        mask = np.expand_dims(mask, axis=0)
+        obs = np.expand_dims(self.last_observation, axis=0)
 
-        v, s, d = self.network(self.last_observation, mask)
-        print(v, s, d)
+        mask = torch.from_numpy(mask).float()
+        obs = torch.from_numpy(obs).float()
 
-        if time not in self.replay_moves:
-            return [1, self.general_position[0], self.general_position[1], 4, 0]
+        v, s, d = self.network(obs, mask)
+        s = s[0].detach().numpy()
+        d = d[0].detach().numpy()
 
-        return self.replay_moves[time]
+        s = np.argmax(s)
+        i, j = divmod(s, 24)
+        d = np.argmax(d)
+        if d == 4:
+            return [1, 0, 0, 0, 0]
+        return [0, i, j, d, 0]
 
     def reset(self):
         pass
