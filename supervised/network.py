@@ -7,7 +7,7 @@ import lightning as L
 class Network(L.LightningModule):
     def __init__(
         self,
-        learning_rate: float = 1e-4,
+        lr: float = 1e-4,
         input_dims: tuple[int, int, int] = (29, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
@@ -15,7 +15,7 @@ class Network(L.LightningModule):
     ):
         super().__init__()
         c, h, w = input_dims
-        self.lr = learning_rate
+        self.lr = lr
 
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -26,6 +26,7 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
+            nn.Tanh(),
         )
 
         self.square_head = nn.Sequential(
@@ -108,17 +109,16 @@ class Network(L.LightningModule):
         value_loss = F.mse_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss + value_loss
-        if loss > 30:
-            print(
-                f"Loss is too high on batch {batch_idx},\
-                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
-            )
-            # get index where loss is high
-            print(direction)
-            print(actions[:, 3])
-            print(target_i)
-            print(target_j)
-            exit()
+        # if loss > 100:
+        #     print(
+        #         f"Loss is too high on batch {batch_idx},\
+        #         s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
+        #     )
+        #     # get index where loss is high
+        #     print(square_loss)
+        #     print(direction_loss)
+        #     print(value_loss)
+        #     exit()
         # if loss > 1e1:
         #     # round to 2 places
         #     print(f"Loss is too high on batch {batch_idx},\
@@ -133,16 +133,26 @@ class Network(L.LightningModule):
         #
         #     return None
         # loss
-        bs = obs.size(0)
-        self.log("value_loss", value_loss, on_step=True, prog_bar=True, batch_size=bs)
-        self.log("square_loss", square_loss, on_step=True, prog_bar=True, batch_size=bs)
-        self.log("dir_loss", direction_loss, on_step=True, prog_bar=True, batch_size=bs)
-        self.log("loss", loss, on_step=True, prog_bar=True, batch_size=bs)
+        self.log("value_loss", value_loss, on_step=True, prog_bar=True)
+        self.log("square_loss", square_loss, on_step=True, prog_bar=True)
+        self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
+        self.log("loss", loss, on_step=True, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        n_batches = 208_000
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=n_batches, eta_min=5e-6
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "name": "learning_rate",
+            },
+        }
 
 
 class Pyramid(nn.Module):
