@@ -1,17 +1,17 @@
-from petting_replays import PettingZooGenerals
-from generals.core.action import compute_valid_action_mask
+from generals.envs import PettingZooGenerals
+from generals.core.action import compute_valid_move_mask
+from generals.agents import RandomAgent
 from replay_agent import ReplayAgent
+import json
 import torch
 import math
 import numpy as np
 
 
 class ReplayDataset(torch.utils.data.IterableDataset):
-    def __init__(self, replay_files):
+    def __init__(self, replay_files: list[str], buffer_size: int = 50):
         self.replay_files = replay_files
-
-        self.A = ReplayAgent(id="A", color="red")
-        self.B = ReplayAgent(id="B", color="blue")
+        self.replays = None
         self.env = None
 
         self.buffer = [
@@ -21,23 +21,11 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 0.0,
                 np.empty(5, dtype=np.int32),
             ]
-            for _ in range(50)
+            for _ in range(buffer_size)
         ]
-        self.buffer_idx = 0
+        self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
-
-    def reset_players(self):
-        obs, moves, bases, values, replay = self.env.reset()
-        self.A.replay_moves = moves[0]
-        self.B.replay_moves = moves[1]
-        self.A.general_position = bases[0]
-        self.B.general_position = bases[1]
-        self.A.value = values[0]
-        self.B.value = values[1]
-        self.A.replay = replay
-        self.B.replay = replay
-
-        return obs
+        self.A, self.B = ReplayAgent(), ReplayAgent()
 
     def check_validity(self, mask, own, action):
         _, i, j, d, _ = action
@@ -57,28 +45,105 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             self.buffer_idx = 0
             # np.random.shuffle(self.buffer)
 
+    def teacher_action(self, moves, base, timestep):
+        if timestep in moves:
+            return moves[timestep]
+        return [1, base[0], base[1], 4, 0]
+
     def __iter__(self):
-        obs = self.reset_players()
+        a, b = "red", "blue"
+        map, moves, values, bases = self.get_new_replay()
+        obs, _ = self.env.reset(options={"grid": map})
         while True:
-            a, b = self.A.id, self.B.id
-            actions = {a: self.A.act(obs[a]), b: self.B.act(obs[b])}
+            timestep = obs[a]["timestep"]
+            # Take teacher actions
+            actions = {
+                a: self.teacher_action(moves[0], bases[0], timestep),
+                b: self.teacher_action(moves[1], bases[1], timestep),
+            }
+            # Ignore these actions, just process observations
+            _ = self.A.act(obs[a])
+            _ = self.B.act(obs[b])
             obs_a = self.A.last_observation
             obs_b = self.B.last_observation
-            mask_a = compute_valid_action_mask(obs[a])
-            mask_b = compute_valid_action_mask(obs[b])
+            mask_a = compute_valid_move_mask(obs[a])
+            mask_b = compute_valid_move_mask(obs[b])
             if self.check_validity(mask_a, self.A.last_observation[9], actions[a]):
-                yield obs_a, mask_a, self.A.value, actions[a]
                 if self.filled:
                     yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_a, mask_a, self.A.value, actions[a])
+                self.save_sample(obs_a, mask_a, values[0], actions[a])
 
             if self.check_validity(mask_b, self.B.last_observation[9], actions[b]):
                 if self.filled:
                     yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_b, mask_b, self.B.value, actions[b])
+                self.save_sample(obs_b, mask_b, values[1], actions[b])
             obs, _, terminated, truncated, _ = self.env.step(actions)
             if all(terminated.values()) or all(truncated.values()):
-                obs = self.reset_players()
+                map, moves, values = self.get_new_replay()
+                obs, bases = self.env.reset(options={"grid": map})
+
+    def get_new_replay(self):
+        game = json.load(open(self.replays[self.replay_idx], "r"))
+        width = game["mapWidth"]
+        height = game["mapHeight"]
+
+        player_moves = [{}, {}]
+        player_values = [-1, -1]
+
+        # Determine winner
+        if len(game["afks"]) == 0:
+            winner = game["moves"][-1][0]
+        else:
+            winner = 1 - game["afks"][0][0]
+        player_values[winner] = 1
+
+        for move in game["moves"]:
+            index, i, j, is50, turn = move[0], move[1], move[2], move[3], move[4]
+            i, j = divmod(move[1], width)
+            if move[2] == move[1] + 1:
+                direction = 3
+            elif move[2] == move[1] - 1:
+                direction = 2
+            elif move[2] == move[1] + game["mapWidth"]:
+                direction = 1
+            elif move[2] == move[1] - game["mapWidth"]:
+                direction = 0
+            player_moves[index][turn] = [0, i, j, direction, is50]
+
+        map = ["." for _ in range(width * height)]
+
+        # place cities
+        for pos, value in zip(game["cities"], game["cityArmies"]):
+            map[pos] = str(value - 40) if value != 50 else "x"
+
+        # place mountains
+        for pos in game["mountains"]:
+            map[pos] = "#"
+
+        # place generals
+        generals = game["generals"]
+        map[generals[0]] = "A"
+        map[generals[1]] = "B"
+        player_bases = [
+            divmod(generals[0], game["mapWidth"]),
+            divmod(generals[1], game["mapWidth"]),
+        ]
+
+        # convert to 2D array
+        map = [
+            map[i : i + game["mapWidth"]] for i in range(0, len(map), game["mapWidth"])
+        ]
+
+        # Pad the game with '#' to make it 24x24
+        pad_width = 24 - width
+        pad_height = 24 - height
+        map = [[*row, *["#" for _ in range(pad_width)]] for row in map]
+        map.extend([["#" for _ in range(24)] for _ in range(pad_height)])
+
+        map_str = "\n".join(["".join(row) for row in map])
+        self.replay_idx += 1
+        self.replay_idx %= len(self.replay_files)
+        return (map_str, player_moves, player_values, player_bases)
 
 
 def per_worker_init_fn(worker_id):
@@ -92,13 +157,13 @@ def per_worker_init_fn(worker_id):
     start = worker_id * per_worker
     end = min(start + per_worker, length)
 
+    dataset.replays = dataset.replay_files[start:end]
+
     dataset.env = PettingZooGenerals(
         agents={
-            dataset.A.id: dataset.A,
-            dataset.B.id: dataset.B,
+            "red": RandomAgent("red"),
+            "blue": RandomAgent("blue"),
         },
-        replay_files=[name for name in dataset.replay_files[start:end]],
-        render_mode=None,
     )
 
 

@@ -11,13 +11,9 @@ class ReplayAgent(Agent):
         self,
         id: str = "19108",
         color: tuple[int, int, int] = (242, 61, 106),
-        replay_moves: dict[int, list[int]] | None = None,
-        general_position: tuple[int, int] | None = None,
         history_size: int | None = 10,
     ):
         super().__init__(id, color)
-        self.replay_moves = replay_moves
-        self.general_position = general_position
         self.history_size = history_size
 
         self.army_stack = np.zeros((self.history_size, 24, 24))
@@ -82,15 +78,10 @@ class ReplayAgent(Agent):
 
     def act(self, observation: Observation) -> Action:
         """
-        Randomly selects a valid action.
+        Just process observation and return dummy value.
         """
-        time = observation["timestep"]
-
         self.last_observation = self.augment_observation(observation)
-        if time not in self.replay_moves:
-            return [1, self.general_position[0], self.general_position[1], 4, 0]
-
-        return self.replay_moves[time]
+        return [1, 0, 0, 0, 0]
 
     def reset(self):
         pass
