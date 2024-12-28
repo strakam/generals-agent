@@ -109,15 +109,15 @@ class Network(L.LightningModule):
         value_loss = F.mse_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss + value_loss
-        # if loss > 100:
-        #     print(
-        #         f"Loss is too high on batch {batch_idx},\
-        #         s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
-        #     )
-        #     # get index where loss is high
-        #     print(square_loss)
-        #     print(direction_loss)
-        #     print(value_loss)
+        if loss > 100:
+            print(
+                f"Loss is too high on batch {batch_idx},\
+                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
+            )
+            # get index where loss is high
+            print(square_loss)
+            print(direction_loss)
+            print(value_loss)
         #     exit()
         # if loss > 1e1:
         #     # round to 2 places

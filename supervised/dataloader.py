@@ -23,16 +23,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             ]
             for _ in range(buffer_size)
         ]
+        self.current_replay = None
         self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
         self.A, self.B = ReplayAgent(), ReplayAgent()
 
-    def check_validity(self, mask, own, action):
+    def check_validity(self, mask, action):
         _, i, j, d, _ = action
-        if d == 4 or mask[i][j][d] == 1:
-            assert own[i][j] == 1, "Invalid action"
-            return True
-        return False
+        return d == 4 or mask[i][j][d] == 1
 
     def save_sample(self, obs, mask, value, action):
         self.buffer[self.buffer_idx][0][:] = obs
@@ -68,12 +66,23 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             obs_b = self.B.last_observation
             mask_a = compute_valid_move_mask(obs[a])
             mask_b = compute_valid_move_mask(obs[b])
-            if self.check_validity(mask_a, self.A.last_observation[9], actions[a]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_a, mask_a, values[0], actions[a])
+            try:
+                if self.check_validity(mask_a, actions[a]):
+                    if self.filled:
+                        # check if any value of the observation is nan via numpy
+                        if np.isnan(self.buffer[self.buffer_idx][0]).any():
+                            print("OOOOOOOOOPS")
+                            exit()
+                        yield self.buffer[self.buffer_idx]
+                    self.save_sample(obs_a, mask_a, values[0], actions[a])
+            except TypeError:
+                print(mask_a)
+                print(self.A.last_observation[9])
+                print(actions[a])
+                print(self.current_replay)
+                exit()
 
-            if self.check_validity(mask_b, self.B.last_observation[9], actions[b]):
+            if self.check_validity(mask_b, actions[b]):
                 if self.filled:
                     yield self.buffer[self.buffer_idx]
                 self.save_sample(obs_b, mask_b, values[1], actions[b])
@@ -81,9 +90,12 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             if all(terminated.values()) or all(truncated.values()):
                 map, moves, values, bases = self.get_new_replay()
                 obs, _ = self.env.reset(options={"grid": map})
+                self.A.reset()
+                self.B.reset()
 
     def get_new_replay(self):
         game = json.load(open(self.replays[self.replay_idx], "r"))
+        self.current_replay = self.replays[self.replay_idx]
         width = game["mapWidth"]
         height = game["mapHeight"]
 
@@ -158,6 +170,8 @@ def per_worker_init_fn(worker_id):
     end = min(start + per_worker, length)
 
     dataset.replays = dataset.replay_files[start:end]
+    print(f"Worker {worker_id} handling replays {start} to {end}")
+    print(f"Worker {worker_id} {dataset.replays[:3]}")
 
     dataset.env = PettingZooGenerals(
         agents={
@@ -168,6 +182,15 @@ def per_worker_init_fn(worker_id):
 
 
 def collate_fn(batch):
+    assert all(
+        b[0].shape == (29, 24, 24) for b in batch
+    ), "Invalid observation dimensions"
+    assert all(b[1].shape == (24, 24, 4) for b in batch), "Invalid mask dimensions"
+    assert all(
+        isinstance(b[2], float) for b in batch
+    ), f"Invalid value type {list((isinstance(b[2], float) for b in batch))}"
+    assert all(b[3].shape == (5,) for b in batch), "Invalid action dimensions"
+
     observations = torch.tensor(np.array([b[0] for b in batch]), dtype=torch.float32)
     masks = torch.tensor(np.array([b[1] for b in batch]), dtype=torch.float32)
     values = torch.tensor(np.array([b[2] for b in batch]), dtype=torch.float32)

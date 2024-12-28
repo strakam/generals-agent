@@ -8,11 +8,12 @@ from network import Network
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
+# n samples = 106752611
 BUFFER_SIZE = 8000
 LEARNING_RATE = 5e-4
 N_CHANNELS = 29
-BATCH_SIZE = 1280
-N_WORKERS = 32
+BATCH_SIZE = 64
+N_WORKERS = 1
 LOG_EVERY_N_STEPS = 10
 EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
@@ -59,7 +60,7 @@ eval_callback = EvalCallback(
 )
 
 trainer = L.Trainer(
-    logger=neptune_logger,
+    # logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,

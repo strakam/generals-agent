@@ -25,6 +25,9 @@ class NeuroAgent(Agent):
         self.general_position = general_position
         self.history_size = history_size
 
+        self.reset()
+
+    def reset(self):
         self.army_stack = np.zeros((self.history_size, 24, 24))
         self.army_stack[0, :, :] = np.zeros((24, 24)).astype(bool)
         self.last_army = np.zeros((24, 24)).astype(bool)
@@ -107,6 +110,3 @@ class NeuroAgent(Agent):
         if d == 4:
             return [1, 0, 0, 0, 0]
         return [0, i, j, d, 0]
-
-    def reset(self):
-        pass

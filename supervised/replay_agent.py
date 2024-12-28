@@ -16,6 +16,9 @@ class ReplayAgent(Agent):
         super().__init__(id, color)
         self.history_size = history_size
 
+        self.reset()
+
+    def reset(self):
         self.army_stack = np.zeros((self.history_size, 24, 24))
         self.army_stack[0, :, :] = np.zeros((24, 24)).astype(bool)
         self.cities = np.zeros((24, 24)).astype(bool)
@@ -82,6 +85,3 @@ class ReplayAgent(Agent):
         """
         self.last_observation = self.augment_observation(observation)
         return [1, 0, 0, 0, 0]
-
-    def reset(self):
-        pass
