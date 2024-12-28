@@ -9,7 +9,7 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 N_SAMPLES = 2*106752611
-BUFFER_SIZE = 8000
+BUFFER_SIZE = 16000
 LEARNING_RATE = 7e-4
 N_CHANNELS = 29
 BATCH_SIZE = 2048
