@@ -140,7 +140,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        n_batches = 166_000
+        n_batches = 104250
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=n_batches, eta_min=5e-6

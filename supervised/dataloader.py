@@ -70,19 +70,13 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             mask_b = compute_valid_move_mask(obs[b])
             try:
                 if self.check_validity(obs_a, mask_a, actions[a]):
-                    # if self.filled:
-                    #     # check if any value of the observation is nan via numpy
-                    #     if np.isnan(self.buffer[self.buffer_idx][0]).any():
-                    #         print("OOOOOOOOOPS")
-                    #         exit()
-                    #     yield self.buffer[self.buffer_idx]
-                    yield (
-                        np.array(obs_a),
-                        np.array(mask_a),
-                        values[0],
-                        np.array(actions[a]),
-                    )
-                    # self.save_sample(obs_a, mask_a, values[0], actions[a])
+                    if self.filled:
+                        # check if any value of the observation is nan via numpy
+                        if np.isnan(self.buffer[self.buffer_idx][0]).any():
+                            print("OOOOOOOOOPS")
+                            exit()
+                        yield self.buffer[self.buffer_idx]
+                    self.save_sample(obs_a, mask_a, values[0], actions[a])
             except TypeError:
                 print(mask_a)
                 print(self.A.last_observation[9])
@@ -90,11 +84,11 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 print(self.current_replay)
                 exit()
 
-            # if self.check_validity(mask_b, actions[b]):
-            #     # if self.filled:
-            #     #     yield self.buffer[self.buffer_idx]
-            #     # self.save_sample(obs_b, mask_b, values[1], actions[b])
-            #     yield obs_b, mask_b, values[1], actions[b]
+            if self.check_validity(obs_b, mask_b, actions[b]):
+                if self.filled:
+                    yield self.buffer[self.buffer_idx]
+                self.save_sample(obs_b, mask_b, values[1], actions[b])
+                yield obs_b, mask_b, values[1], actions[b]
             obs, _, terminated, _, _ = self.env.step(actions)
             if all(terminated.values()) or timestep == length:
                 map, moves, values, bases, length = self.get_new_replay()
@@ -105,7 +99,6 @@ class ReplayDataset(torch.utils.data.IterableDataset):
     def get_new_replay(self):
         game = json.load(open(self.replays[self.replay_idx], "r"))
         self.current_replay = self.replays[self.replay_idx]
-        print(self.current_replay)
         width = game["mapWidth"]
         height = game["mapHeight"]
 
@@ -194,15 +187,6 @@ def per_worker_init_fn(worker_id):
 
 
 def collate_fn(batch):
-    assert all(
-        b[0].shape == (29, 24, 24) for b in batch
-    ), "Invalid observation dimensions"
-    assert all(b[1].shape == (24, 24, 4) for b in batch), "Invalid mask dimensions"
-    assert all(
-        isinstance(b[2], float) for b in batch
-    ), f"Invalid value type {list((isinstance(b[2], float) for b in batch))}"
-    assert all(b[3].shape == (5,) for b in batch), "Invalid action dimensions"
-
     observations = torch.tensor(np.array([b[0] for b in batch]), dtype=torch.float32)
     masks = torch.tensor(np.array([b[1] for b in batch]), dtype=torch.float32)
     values = torch.tensor(np.array([b[2] for b in batch]), dtype=torch.float32)
