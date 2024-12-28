@@ -28,9 +28,10 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.filled = False
         self.A, self.B = ReplayAgent(), ReplayAgent()
 
-    def check_validity(self, mask, action):
+    def check_validity(self, obs, mask, action):
         _, i, j, d, _ = action
-        return d == 4 or mask[i][j][d] == 1
+        army = obs[1][i][j]
+        return d == 4 or (mask[i][j][d] == 1 and army > 1)
 
     def save_sample(self, obs, mask, value, action):
         self.buffer[self.buffer_idx][0][:] = obs
@@ -43,21 +44,22 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             self.buffer_idx = 0
             np.random.shuffle(self.buffer)
 
-    def teacher_action(self, moves, base, timestep):
-        if timestep in moves:
-            return moves[timestep]
-        return [1, base[0], base[1], 4, 0]
+    def teacher_action(self, moves, base, timestep, t):
+        action = moves[timestep] if timestep in moves else [1, base[0], base[1], 4, 0]
+        return action
 
     def __iter__(self):
         a, b = "red", "blue"
-        map, moves, values, bases = self.get_new_replay()
+        map, moves, values, bases, length = self.get_new_replay()
         obs, _ = self.env.reset(options={"grid": map})
+        t = 0
         while True:
             timestep = obs[a]["timestep"]
             # Take teacher actions
+            t += 1
             actions = {
-                a: self.teacher_action(moves[0], bases[0], timestep),
-                b: self.teacher_action(moves[1], bases[1], timestep),
+                a: self.teacher_action(moves[0], bases[0], timestep, t),
+                b: self.teacher_action(moves[1], bases[1], timestep, t),
             }
             # Ignore these actions, just process observations
             _ = self.A.act(obs[a])
@@ -67,14 +69,20 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             mask_a = compute_valid_move_mask(obs[a])
             mask_b = compute_valid_move_mask(obs[b])
             try:
-                if self.check_validity(mask_a, actions[a]):
-                    if self.filled:
-                        # check if any value of the observation is nan via numpy
-                        if np.isnan(self.buffer[self.buffer_idx][0]).any():
-                            print("OOOOOOOOOPS")
-                            exit()
-                        yield self.buffer[self.buffer_idx]
-                    self.save_sample(obs_a, mask_a, values[0], actions[a])
+                if self.check_validity(obs_a, mask_a, actions[a]):
+                    # if self.filled:
+                    #     # check if any value of the observation is nan via numpy
+                    #     if np.isnan(self.buffer[self.buffer_idx][0]).any():
+                    #         print("OOOOOOOOOPS")
+                    #         exit()
+                    #     yield self.buffer[self.buffer_idx]
+                    yield (
+                        np.array(obs_a),
+                        np.array(mask_a),
+                        values[0],
+                        np.array(actions[a]),
+                    )
+                    # self.save_sample(obs_a, mask_a, values[0], actions[a])
             except TypeError:
                 print(mask_a)
                 print(self.A.last_observation[9])
@@ -82,13 +90,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 print(self.current_replay)
                 exit()
 
-            if self.check_validity(mask_b, actions[b]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_b, mask_b, values[1], actions[b])
-            obs, _, terminated, truncated, _ = self.env.step(actions)
-            if all(terminated.values()) or all(truncated.values()):
-                map, moves, values, bases = self.get_new_replay()
+            # if self.check_validity(mask_b, actions[b]):
+            #     # if self.filled:
+            #     #     yield self.buffer[self.buffer_idx]
+            #     # self.save_sample(obs_b, mask_b, values[1], actions[b])
+            #     yield obs_b, mask_b, values[1], actions[b]
+            obs, _, terminated, _, _ = self.env.step(actions)
+            if all(terminated.values()) or timestep == length:
+                map, moves, values, bases, length = self.get_new_replay()
                 obs, _ = self.env.reset(options={"grid": map})
                 self.A.reset()
                 self.B.reset()
@@ -96,18 +105,19 @@ class ReplayDataset(torch.utils.data.IterableDataset):
     def get_new_replay(self):
         game = json.load(open(self.replays[self.replay_idx], "r"))
         self.current_replay = self.replays[self.replay_idx]
+        print(self.current_replay)
         width = game["mapWidth"]
         height = game["mapHeight"]
 
         player_moves = [{}, {}]
-        player_values = [-1, -1]
+        player_values = [-1.0, -1.0]
 
         # Determine winner
         if len(game["afks"]) == 0:
             winner = game["moves"][-1][0]
         else:
             winner = 1 - game["afks"][0][0]
-        player_values[winner] = 1
+        player_values[winner] = 1.0
 
         for move in game["moves"]:
             index, i, j, is50, turn = move[0], move[1], move[2], move[3], move[4]
@@ -122,6 +132,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 direction = 0
             player_moves[index][turn] = [0, i, j, direction, is50]
 
+        # calculate game length as time of the last move
+        game_length = game["moves"][-1][4]
         map = ["." for _ in range(width * height)]
 
         # place cities
@@ -155,7 +167,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         map_str = "\n".join(["".join(row) for row in map])
         self.replay_idx += 1
         self.replay_idx %= len(self.replays)
-        return (map_str, player_moves, player_values, player_bases)
+        return (map_str, player_moves, player_values, player_bases, game_length)
 
 
 def per_worker_init_fn(worker_id):
