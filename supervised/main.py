@@ -8,7 +8,8 @@ from network import Network
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-N_SAMPLES = 2*106752611
+N_SAMPLES = 2 * 106752611
+N_SAMPLES = 2 * 60995855
 BUFFER_SIZE = 16000
 LEARNING_RATE = 7e-4
 N_CHANNELS = 29
@@ -17,7 +18,8 @@ N_WORKERS = 32
 LOG_EVERY_N_STEPS = 10
 EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
-MAX_STEPS = N_SAMPLES // BATCH_SIZE
+N_EPOCHS = 2
+MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 
 torch.manual_seed(0)
 torch.set_float32_matmul_precision("high")
@@ -45,7 +47,9 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-model = Network(lr=LEARNING_RATE, input_dims=(N_CHANNELS, 24, 24), compile=True)
+model = Network(
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=True
+)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath="checkpoints",

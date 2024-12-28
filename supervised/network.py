@@ -8,6 +8,7 @@ class Network(L.LightningModule):
     def __init__(
         self,
         lr: float = 1e-4,
+        n_steps: int = 100000,
         input_dims: tuple[int, int, int] = (29, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
@@ -16,6 +17,7 @@ class Network(L.LightningModule):
         super().__init__()
         c, h, w = input_dims
         self.lr = lr
+        self.n_steps = n_steps
 
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -143,10 +145,9 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        n_batches = 104250
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=n_batches, eta_min=5e-6
+            optimizer, T_max=self.n_steps, eta_min=5e-6
         )
         return {
             "optimizer": optimizer,
