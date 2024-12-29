@@ -10,10 +10,10 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 # N_SAMPLES = 2 * 106752611
 SEED = 7
 N_SAMPLES = 2 * 60995855
-BUFFER_SIZE = 18000
+BUFFER_SIZE = 8000
 LEARNING_RATE = 3e-4
-BATCH_SIZE = 1792
-N_WORKERS = 32
+BATCH_SIZE = 128#1792
+N_WORKERS = 4
 LOG_EVERY_N_STEPS = 10
 # EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
@@ -48,6 +48,28 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
+one, two = 0, 0
+weight_one, weight_two = 0, 0
+c = 0
+for b in dataloader:
+    obs, mask, values, actions, weights, replay_ids = b
+    # count number of samples with weight == 1.0 and with weight 0.02
+    one += torch.sum(weights == 1.0)
+    two += torch.sum(weights == 0.02)
+    weight_one += torch.sum(weights[weights == 1.0])
+    weight_two += torch.sum(weights[weights == 0.02])
+    c+=1
+    if c > 2000:
+        break
+print(one, two)
+print(weight_one, weight_two)
+print(one/(one+two))
+print(weight_one/(weight_one+weight_two))
+exit()
+
+    
+
+
 model = Network(
     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(29, 24, 24), compile=True
 )
@@ -65,7 +87,7 @@ checkpoint_callback = ModelCheckpoint(
 # )
 
 trainer = L.Trainer(
-    logger=neptune_logger,
+    # logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,

@@ -30,7 +30,6 @@ for replay in tqdm.tqdm(all_replays):
         high_elo_frames += frames
     if stars[0] > 70 and stars[1] > 70:
         high_elo_frames += frames
-        highest_elo_reps.append(id)
         both[2] += 1
     bins[frames // 100] += 1
     total_frames += frames

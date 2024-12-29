@@ -41,9 +41,8 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.square_loss = nn.CrossEntropyLoss(reduction="none")
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 2])
-        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
+        self.square_loss = nn.CrossEntropyLoss()
+        self.direction_loss = nn.CrossEntropyLoss()
         self.value_loss = nn.MSELoss()
 
         if compile:
@@ -54,7 +53,7 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        timestep_normalize = 500
+        timestep_normalize = 25
         army_normalize = 500
         land_normalize = 200
 
@@ -63,7 +62,7 @@ class Network(L.LightningModule):
         obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
         obs[:, 15, :, :] = obs[:, 15, :, :] / land_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-        obs[:, 13, :, :] = obs[:, 13, :, :] / timestep_normalize
+        obs[:, 13, :, :] = (25 - obs[:, 13, :, :] % 25) / timestep_normalize
         obs[:, 19:, :, :] = obs[:, 19:, :, :] / army_normalize
         return obs
 
@@ -103,7 +102,7 @@ class Network(L.LightningModule):
         return square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, values, actions, weights, replay_ids = batch
+        obs, mask, values, actions, replay_ids = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
@@ -111,7 +110,7 @@ class Network(L.LightningModule):
         square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
-        square_loss = (self.square_loss(square, target_cell.long()) * weights).mean()
+        square_loss = self.square_loss(square, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
         # value_loss = self.value_loss(value.flatten(), values)
 
@@ -150,7 +149,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.n_steps, eta_min=5e-6
         )
