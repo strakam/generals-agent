@@ -20,6 +20,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 np.empty((24, 24, 4), dtype=np.float32),
                 0.0,
                 np.empty(5, dtype=np.int32),
+                1.0,
                 "",
             ]
             for _ in range(buffer_size)
@@ -34,21 +35,27 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         army = obs[1][i][j]
         return d == 4 or (mask[i][j][d] == 1 and army > 1)
 
-    def save_sample(self, obs, mask, value, action, replay_id):
+    def save_sample(self, obs, mask, value, action, weight, replay_id):
         self.buffer[self.buffer_idx][0][:] = obs
         self.buffer[self.buffer_idx][1][:] = mask
         self.buffer[self.buffer_idx][2] = value
         self.buffer[self.buffer_idx][3][:] = action
-        self.buffer[self.buffer_idx][4] = replay_id
+        self.buffer[self.buffer_idx][4] = weight
+        self.buffer[self.buffer_idx][5] = replay_id
         self.buffer_idx += 1
         if self.buffer_idx == len(self.buffer):
             self.filled = True
             self.buffer_idx = 0
             np.random.shuffle(self.buffer)
 
-    def teacher_action(self, moves, base, timestep, t):
-        action = moves[timestep] if timestep in moves else [1, base[0], base[1], 4, 0]
-        return action
+    def teacher_action(self, moves, base, timestep):
+        if timestep in moves:
+            action = moves[timestep]
+            weight = 1.0
+        else:
+            action = [1, base[0], base[1], 4, 0]
+            weight = 0.02
+        return action, weight
 
     def __iter__(self):
         a, b = "red", "blue"
@@ -65,10 +72,9 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             timestep = obs[a]["timestep"]
             # Take teacher actions
             t += 1
-            actions = {
-                a: self.teacher_action(moves[0], bases[0], timestep, t),
-                b: self.teacher_action(moves[1], bases[1], timestep, t),
-            }
+            a0, w0 = self.teacher_action(moves[0], bases[0], timestep)
+            a1, w1 = self.teacher_action(moves[1], bases[1], timestep)
+            actions = {a: a0, b: a1}
             # Ignore these actions, just process observations
             _ = self.A.act(obs[a])
             _ = self.B.act(obs[b])
@@ -78,12 +84,12 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             mask_b = compute_valid_move_mask(obs[b])
             if self.check_validity(obs_a, mask_a, actions[a]):
                 self.save_sample(
-                    obs_a, mask_a, values[0], actions[a], self.current_replay
+                    obs_a, mask_a, values[0], actions[a], w0, self.current_replay
                 )
 
             if self.check_validity(obs_b, mask_b, actions[b]):
                 self.save_sample(
-                    obs_b, mask_b, values[1], actions[b], self.current_replay
+                    obs_b, mask_b, values[1], actions[b], w1, self.current_replay
                 )
             obs, _, terminated, _, _ = self.env.step(actions)
             if all(terminated.values()) or timestep >= length:
@@ -187,5 +193,6 @@ def collate_fn(batch):
     masks = torch.tensor(np.array([b[1] for b in batch]), dtype=torch.float32)
     values = torch.tensor(np.array([b[2] for b in batch]), dtype=torch.float32)
     actions = torch.tensor(np.array([b[3] for b in batch]), dtype=torch.int64)
+    weights = torch.tensor(np.array([b[4] for b in batch]), dtype=torch.float32)
     replay_ids = [b[4] for b in batch]
-    return observations, masks, values, actions, replay_ids
+    return observations, masks, values, actions, weights, replay_ids

@@ -41,7 +41,7 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.square_loss = nn.CrossEntropyLoss()
+        self.square_loss = nn.CrossEntropyLoss(reduction="none")
         weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 60])
         self.direction_loss = nn.CrossEntropyLoss(weight=weights)
         self.value_loss = nn.MSELoss()
@@ -54,7 +54,7 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        timestep_normalize = 500
+        timestep_normalize = 800
         army_normalize = 500
         land_normalize = 200
 
@@ -103,7 +103,7 @@ class Network(L.LightningModule):
         return square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, values, actions, replay_ids = batch
+        obs, mask, values, actions, weights, replay_ids = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
@@ -111,7 +111,7 @@ class Network(L.LightningModule):
         square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
-        square_loss = self.square_loss(square, target_cell.long())
+        square_loss = (self.square_loss(square, target_cell.long()) * weights).mean()
         direction_loss = self.direction_loss(direction, actions[:, 3])
         # value_loss = self.value_loss(value.flatten(), values)
 
