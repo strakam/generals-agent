@@ -42,7 +42,8 @@ class Network(L.LightningModule):
         )
 
         self.square_loss = nn.CrossEntropyLoss()
-        self.direction_loss = nn.CrossEntropyLoss()
+        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 60])
+        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
         self.value_loss = nn.MSELoss()
 
         if compile:

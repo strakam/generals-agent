@@ -24,9 +24,10 @@ for replay in tqdm.tqdm(all_replays):
     stars = game["stars"]
     total.append(frames)
     if stars[0] > 50 and stars[1] > 50:
-        both[0] += 1
+        pass
     if stars[0] > 60 and stars[1] > 60:
         both[1] += 1
+        high_elo_frames += frames
     if stars[0] > 70 and stars[1] > 70:
         high_elo_frames += frames
         highest_elo_reps.append(id)
