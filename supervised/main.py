@@ -9,9 +9,10 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 # N_SAMPLES = 2 * 106752611
+SEED=7
 N_SAMPLES = 2 * 60995855
-BUFFER_SIZE = 6000
-LEARNING_RATE = 7e-4
+BUFFER_SIZE = 16000
+LEARNING_RATE = 5e-4
 N_CHANNELS = 29
 BATCH_SIZE = 1536
 N_WORKERS = 32
@@ -22,7 +23,7 @@ N_EPOCHS = 3
 CLIP_VAL = 3.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 
-torch.manual_seed(0)
+torch.manual_seed(SEED)
 torch.set_float32_matmul_precision("high")
 
 key_file = open("neptune_token.txt", "r")
@@ -50,11 +51,11 @@ dataloader = torch.utils.data.DataLoader(
 )
 
 model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=False
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=True
 )
 
 checkpoint_callback = ModelCheckpoint(
-    dirpath="checkpoints",
+    dirpath="/storage/praha1/home/strakam3/checkpoints",
     save_top_k=-1,
     every_n_train_steps=2000,
 )

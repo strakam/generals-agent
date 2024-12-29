@@ -28,7 +28,7 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
-            Lambda(lambda x: 2.0 * torch.tanh(x))  # Scale up tanh
+            Lambda(lambda x: 2.0 * torch.tanh(x)),  # Scale up tanh
         )
 
         self.square_head = nn.Sequential(
@@ -69,7 +69,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        value = self.value_head(x)
+        # value = self.value_head(x)
 
         square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
         square_logits = self.square_head(x)
@@ -99,7 +99,7 @@ class Network(L.LightningModule):
         # take argmax
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return value, square_logits, direction
+        return square_logits, direction
 
     def training_step(self, batch, batch_idx):
         obs, mask, values, actions, replay_ids = batch
@@ -107,25 +107,25 @@ class Network(L.LightningModule):
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
 
-        value, square, direction = self(obs, mask, target_cell)
+        square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
         square_loss = self.square_loss(square, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
-        value_loss = self.value_loss(value.flatten(), values)
+        # value_loss = self.value_loss(value.flatten(), values)
 
-        loss = square_loss + direction_loss + value_loss
+        loss = square_loss + direction_loss
         if loss > 10:
             print(
                 f"Loss is too high on batch {batch_idx},\
-                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}"
+                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}"
             )
             # take only last part of ids separated by /
             replay_ids = [replay_id.split("/")[-1] for replay_id in replay_ids]
             print(replay_ids)
             print(F.cross_entropy(square, target_cell.long(), reduction="none"))
             print(F.cross_entropy(direction, actions[:, 3], reduction="none"))
-            print(F.mse_loss(value.flatten(), values, reduction="none"))
+            # print(F.mse_loss(value.flatten(), values, reduction="none"))
             # get index where loss is high
         #     exit()
         # if loss > 1e1:
@@ -142,7 +142,7 @@ class Network(L.LightningModule):
         #
         #     return None
         # loss
-        self.log("value_loss", value_loss, on_step=True, prog_bar=True)
+        # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
         self.log("loss", loss, on_step=True, prog_bar=True)
@@ -304,11 +304,12 @@ class DeconvResBlock(nn.Module):
 
         return x
 
+
 class Lambda(nn.Module):
     def __init__(self, func):
         super().__init__()
         self.func = func
-    
+
     @torch.compile
     def forward(self, x):
         return self.func(x)
