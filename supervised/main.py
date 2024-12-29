@@ -16,7 +16,7 @@ N_CHANNELS = 29
 BATCH_SIZE = 2048
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 10
-EVAL_INTERVAL = 5000
+# EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
@@ -34,6 +34,7 @@ neptune_logger = NeptuneLogger(
 
 # replays = [f"all_replays/old/{name}" for name in os.listdir("all_replays/old/")]
 replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
+# replays = ["all_replays/new/gHtmCKd1F"]
 
 torch.randperm(len(replays))
 
@@ -48,7 +49,7 @@ dataloader = torch.utils.data.DataLoader(
 )
 
 model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=True
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=False
 )
 
 checkpoint_callback = ModelCheckpoint(
@@ -57,11 +58,11 @@ checkpoint_callback = ModelCheckpoint(
     every_n_train_steps=2000,
 )
 
-eval_callback = EvalCallback(
-    network=model,
-    eval_interval=EVAL_INTERVAL,
-    n_eval_games=EVAL_N_GAMES,
-)
+# eval_callback = EvalCallback(
+#     network=model,
+#     eval_interval=EVAL_INTERVAL,
+#     n_eval_games=EVAL_N_GAMES,
+# )
 
 trainer = L.Trainer(
     logger=neptune_logger,
@@ -70,7 +71,7 @@ trainer = L.Trainer(
     max_epochs=-1,
     gradient_clip_val=5.0,
     gradient_clip_algorithm="norm",
-    callbacks=[checkpoint_callback, eval_callback],
+    callbacks=[checkpoint_callback],
 )
 # trainer = L.Trainer()
 trainer.fit(model, train_dataloaders=dataloader)

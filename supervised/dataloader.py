@@ -56,6 +56,12 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         obs, _ = self.env.reset(options={"grid": map})
         t = 0
         while True:
+            if self.filled:
+                while self.buffer_idx < len(self.buffer):
+                    yield self.buffer[self.buffer_idx]
+                    self.buffer_idx += 1
+                self.buffer_idx = 0
+                self.filled = False
             timestep = obs[a]["timestep"]
             # Take teacher actions
             t += 1
@@ -71,14 +77,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             mask_a = compute_valid_move_mask(obs[a])
             mask_b = compute_valid_move_mask(obs[b])
             if self.check_validity(obs_a, mask_a, actions[a]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_a, mask_a, values[0], actions[a], self.current_replay)
+                self.save_sample(
+                    obs_a, mask_a, values[0], actions[a], self.current_replay
+                )
 
             if self.check_validity(obs_b, mask_b, actions[b]):
-                if self.filled:
-                    yield self.buffer[self.buffer_idx]
-                self.save_sample(obs_b, mask_b, values[1], actions[b], self.current_replay)
+                self.save_sample(
+                    obs_b, mask_b, values[1], actions[b], self.current_replay
+                )
             obs, _, terminated, _, _ = self.env.step(actions)
             if all(terminated.values()) or timestep >= length:
                 map, moves, values, bases, length = self.get_new_replay()
