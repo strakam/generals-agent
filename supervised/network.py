@@ -41,7 +41,7 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.square_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
+        self.square_loss = nn.CrossEntropyLoss()
         self.direction_loss = nn.CrossEntropyLoss()
         self.value_loss = nn.MSELoss()
 
@@ -74,7 +74,6 @@ class Network(L.LightningModule):
         square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
         square_logits = self.square_head(x)
         square_logits = (square_logits + square_mask).flatten(1)
-        square_probs = F.softmax(square_logits, dim=1)
 
         if teacher_cells is not None:
             square = teacher_cells
@@ -96,12 +95,11 @@ class Network(L.LightningModule):
         representation_with_square = torch.cat((x, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
-        direction = F.softmax(direction, dim=1)
 
         # take argmax
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return value, square_probs, direction
+        return value, square_logits, direction
 
     def training_step(self, batch, batch_idx):
         obs, mask, values, actions, replay_ids = batch
@@ -151,7 +149,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.n_steps, eta_min=5e-6
         )

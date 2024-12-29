@@ -10,7 +10,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 # N_SAMPLES = 2 * 106752611
 N_SAMPLES = 2 * 60995855
-BUFFER_SIZE = 16000
+BUFFER_SIZE = 6000
 LEARNING_RATE = 7e-4
 N_CHANNELS = 29
 BATCH_SIZE = 1536
@@ -19,6 +19,7 @@ LOG_EVERY_N_STEPS = 10
 # EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
+CLIP_VAL = 3.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 
 torch.manual_seed(0)
@@ -69,7 +70,7 @@ trainer = L.Trainer(
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,
-    gradient_clip_val=5.0,
+    gradient_clip_val=CLIP_VAL,
     gradient_clip_algorithm="norm",
     callbacks=[checkpoint_callback],
 )
