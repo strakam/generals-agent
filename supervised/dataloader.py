@@ -122,7 +122,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             player_moves[index][turn] = [0, i, j, direction, is50]
 
         # calculate game length as time of the last move
-        game_length = game["moves"][-1][4]
+        game_length = game["moves"][-1][4] + 1
         map = ["." for _ in range(width * height)]
 
         # place cities
