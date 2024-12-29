@@ -1,35 +1,36 @@
-import gymnasium as gym
 import numpy as np
+import time
+from generals.envs import PettingZooGenerals
 
 from generals import Replay
-from generals.agents import ExpanderAgent
 from generals import GridFactory
 from replay_agent import ReplayAgent
 import json
 
 # index, start, end, is50, turn
-
-game = json.load(open("all_replays/new/HfmB3nmWk", "r"))
-# make string long replay game["mapHeight"] * game["mapWidth"] long with "." 
+game = json.load(open("supervised/all_replays/new/X5oZlyrXb", "r"))
+# make string long replay game["mapHeight"] * game["mapWidth"] long with "."
 map = ["." for _ in range(game["mapHeight"] * game["mapWidth"])]
 for pos, value in zip(game["cities"], game["cityArmies"]):
-    map[pos] = str(value - 40)
+    if value == 50:
+        map[pos] = "x"
+    else:
+        map[pos] = str(value - 40)
 for pos in game["mountains"]:
     map[pos] = "#"
 generals = game["generals"]
 map[generals[0]] = "A"
 map[generals[1]] = "B"
 
-map = [map[i:i+game["mapWidth"]] for i in range(0, len(map), game["mapWidth"])]
+map = [map[i : i + game["mapWidth"]] for i in range(0, len(map), game["mapWidth"])]
 map_str = "\n".join(["".join(row) for row in map])
 options = {"grid": map_str, "replay_file": "verify"}
 
 
 gf = GridFactory(
-    grid_dims=(4, 4),                      # Dimensions of the grid (height, width)
-    mountain_density=0.2,                  # Probability of a mountain in a cell
-    city_density=0.05,                     # Probability of a city in a cell
-    general_positions=[(0,0),(3,3)],       # Positions of generals (i, j)
+    mountain_density=0.2,  # Probability of a mountain in a cell
+    city_density=0.05,  # Probability of a city in a cell
+    general_positions=[(0, 0), (3, 3)],  # Positions of generals (i, j)
 )
 
 moves = game["moves"]
@@ -51,44 +52,42 @@ for move in moves:
         "direction": direction,
         "split": move[3],
     }
-    print(players_moves[move[0]][move[4]])
-# get size of object in bytes
-import sys
-def get_size(obj, seen=None):
-    size = sys.getsizeof(obj)
-    if seen is None:
-        seen = set()
-    obj_id = id(obj)
-    if obj_id in seen:
-        return 0
-    seen.add(obj_id)
-    if isinstance(obj, dict):
-        size += sum([get_size(v, seen) for v in obj.values()])
-        size += sum([get_size(k, seen) for k in obj.keys()])
-    elif hasattr(obj, "__dict__"):
-        size += get_size(obj.__dict__, seen)
-    elif hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes, bytearray)):
-        size += sum([get_size(i, seen) for i in obj])
-    return size
 
 # Initialize agents
-agent = ReplayAgent(players_moves[0], game["usernames"][0], color=(0, 0, 255))
-npc = ReplayAgent(players_moves[1], game["usernames"][1])
+agent = ReplayAgent(
+    game["usernames"][0], color=(255, 0, 0), replay_moves=players_moves[0]
+)
+npc = ReplayAgent(
+    game["usernames"][1], color=(0, 0, 255), replay_moves=players_moves[1]
+)
 
+agents = {
+    game["usernames"][0]: agent,
+    game["usernames"][1]: npc,
+}
+game_length = moves[-1][4] + 1
 # Create environment
-env = gym.make("gym-generals-v0", agent=agent, npc=npc, grid_factory=gf, render_mode="human")
+env = PettingZooGenerals(
+    agents=agents,
+    grid_factory=gf,
+    render_mode=None,
+    truncation=game_length,
+)
 # time length of one game
-import time
 start = time.time()
-t=0
-
-observation, info = env.reset(options=options)
-terminated = truncated = False
-while not (terminated or truncated):
-    action = agent.act(observation)
-    observation, reward, terminated, truncated, info = env.step(action)
-    t+=1
+t = 0
+print(map_str)
+observations, info = env.reset(options=options)
+done = False
+while not done:
+    actions = {}
+    for k, v in observations.items():
+        actions[k] = agents[k].act(v)
+    observations, reward, terminated, truncated, info = env.step(actions)
     env.render()
+    t += 1
+    done = any(terminated.values()) or any(truncated.values())
+    # env.render()
 print(f"Time taken {time.time() - start:.5f} seconds")
 print(t)
 
