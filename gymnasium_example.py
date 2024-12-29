@@ -8,7 +8,7 @@ from replay_agent import ReplayAgent
 import json
 
 # index, start, end, is50, turn
-game = json.load(open("supervised/all_replays/new/X5oZlyrXb", "r"))
+game = json.load(open("supervised/all_replays/new/7oRrPPF4n", "r"))
 # make string long replay game["mapHeight"] * game["mapWidth"] long with "."
 map = ["." for _ in range(game["mapHeight"] * game["mapWidth"])]
 for pos, value in zip(game["cities"], game["cityArmies"]):

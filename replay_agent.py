@@ -21,12 +21,15 @@ class ReplayAgent(Agent):
         """
         Randomly selects a valid action.
         """
-        observation = observation["observation"]
         time = observation["timestep"]
 
         if time not in self.replay_moves:
             return [1, 0, 0, 0, 0]
-        return self.replay_moves[time]
+        move = self.replay_moves[time]
+        cell = move["cell"]
+        direction = move["direction"]
+        split = move["split"]
+        return [0, cell[0], cell[1], direction, split]
 
     def reset(self):
         pass

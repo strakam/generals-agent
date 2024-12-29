@@ -11,6 +11,8 @@ supervised/wandb/
 supervised/.neptune/
 supervised/checkpoints/
 
+*.tar
+
 # C extensions
 *.so
 
