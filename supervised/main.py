@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 SEED = 7
 N_SAMPLES = 2 * 60995855
 BUFFER_SIZE = 18000
-LEARNING_RATE = 5e-4
+LEARNING_RATE = 3e-4
 BATCH_SIZE = 1536
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 10

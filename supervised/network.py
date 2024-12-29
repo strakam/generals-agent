@@ -149,7 +149,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.n_steps, eta_min=5e-6
         )
