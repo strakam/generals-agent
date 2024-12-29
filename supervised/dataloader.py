@@ -194,5 +194,5 @@ def collate_fn(batch):
     values = torch.tensor(np.array([b[2] for b in batch]), dtype=torch.float32)
     actions = torch.tensor(np.array([b[3] for b in batch]), dtype=torch.int64)
     weights = torch.tensor(np.array([b[4] for b in batch]), dtype=torch.float32)
-    replay_ids = [b[4] for b in batch]
+    replay_ids = [b[5] for b in batch]
     return observations, masks, values, actions, weights, replay_ids

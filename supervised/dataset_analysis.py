@@ -13,9 +13,9 @@ highest_elo_reps = []
 # read all_replays/old/
 old_replays = [f"all_replays/old/{id}" for id in os.listdir("all_replays/old/")]
 new_replays = [f"all_replays/new/{id}" for id in os.listdir("all_replays/new/")]
-# print("Old replays: ", len(old_replays))
-print("New replays: ", len(new_replays))
-all_replays = new_replays + old_replays
+highelo = [f"highelo/{id}" for id in os.listdir("highelo/")]
+# all_replays = new_replays + old_replays
+all_replays = highelo
 
 for replay in tqdm.tqdm(all_replays):
     id = replay.split("/")[-1]
@@ -23,9 +23,8 @@ for replay in tqdm.tqdm(all_replays):
     frames = game["moves"][-1][4]
     stars = game["stars"]
     total.append(frames)
-    if stars[0] > 50 and stars[1] > 50:
-        pass
     if stars[0] > 60 and stars[1] > 60:
+        json.dump(game, open(f"highelo/{id}", "w"))
         both[1] += 1
         high_elo_frames += frames
     if stars[0] > 70 and stars[1] > 70:

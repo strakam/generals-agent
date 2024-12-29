@@ -9,16 +9,17 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 # N_SAMPLES = 2 * 106752611
 SEED = 7
-N_SAMPLES = 2 * 60995855
-BUFFER_SIZE = 8000
-LEARNING_RATE = 3e-4
-BATCH_SIZE = 128#1792
-N_WORKERS = 4
-LOG_EVERY_N_STEPS = 10
+# N_SAMPLES = 2 * 60995855 # For all new replays
+N_SAMPLES = 2 * 23504481 # For high elo replays
+BUFFER_SIZE = 18000
+LEARNING_RATE = 2e-4
+BATCH_SIZE = 1792
+N_WORKERS = 32
+LOG_EVERY_N_STEPS = 20
 # EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
-CLIP_VAL = 1.5
+CLIP_VAL = 2.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 
 torch.manual_seed(SEED)
@@ -33,8 +34,7 @@ neptune_logger = NeptuneLogger(
 
 
 # replays = [f"all_replays/old/{name}" for name in os.listdir("all_replays/old/")]
-replays = [f"all_replays/new/{name}" for name in os.listdir("all_replays/new/")]
-# replays = ["all_replays/new/gHtmCKd1F"]
+replays = [f"highelo/{name}" for name in os.listdir("highelo/")]
 
 torch.randperm(len(replays))
 
@@ -48,36 +48,14 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-one, two = 0, 0
-weight_one, weight_two = 0, 0
-c = 0
-for b in dataloader:
-    obs, mask, values, actions, weights, replay_ids = b
-    # count number of samples with weight == 1.0 and with weight 0.02
-    one += torch.sum(weights == 1.0)
-    two += torch.sum(weights == 0.02)
-    weight_one += torch.sum(weights[weights == 1.0])
-    weight_two += torch.sum(weights[weights == 0.02])
-    c+=1
-    if c > 2000:
-        break
-print(one, two)
-print(weight_one, weight_two)
-print(one/(one+two))
-print(weight_one/(weight_one+weight_two))
-exit()
-
-    
-
-
 model = Network(
     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(29, 24, 24), compile=True
 )
 
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/storage/praha1/home/strakam3/checkpoints",
+    dirpath="/storage/praha1/home/strakam3/checkpoints2",
     save_top_k=-1,
-    every_n_train_steps=1000,
+    every_n_train_steps=3000,
 )
 
 # eval_callback = EvalCallback(

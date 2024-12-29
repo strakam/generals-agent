@@ -42,7 +42,7 @@ class Network(L.LightningModule):
         )
 
         self.square_loss = nn.CrossEntropyLoss(reduction="none")
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 2])
+        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 10])
         self.direction_loss = nn.CrossEntropyLoss(weight=weights)
         self.value_loss = nn.MSELoss()
 
@@ -126,22 +126,6 @@ class Network(L.LightningModule):
             print(replay_ids)
             print(F.cross_entropy(square, target_cell.long(), reduction="none"))
             print(F.cross_entropy(direction, actions[:, 3], reduction="none"))
-            # print(F.mse_loss(value.flatten(), values, reduction="none"))
-            # get index where loss is high
-        #     exit()
-        # if loss > 1e1:
-        #     # round to 2 places
-        #     print(f"Loss is too high on batch {batch_idx},\
-        #         s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}, v: {value_loss.mean():.2f}")
-        #     # print replay id where loss is high like this (square loss, direction loss, value loss, replay id)
-        #     # for each sample in the batch
-        #     for i in range(len(square_loss)):
-        #         print(
-        #             f"{square_loss[i]:.2f}, {direction_loss[i]:.2f}, {value_loss[i]:.2f}, {replay_ids[i]}"
-        #         )
-        #     exit()
-        #
-        #     return None
         # loss
         # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
