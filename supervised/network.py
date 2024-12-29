@@ -53,7 +53,7 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        timestep_normalize = 25
+        timestep_normalize = 500
         army_normalize = 500
         land_normalize = 200
 
@@ -62,7 +62,7 @@ class Network(L.LightningModule):
         obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
         obs[:, 15, :, :] = obs[:, 15, :, :] / land_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-        obs[:, 13, :, :] = (25 - obs[:, 13, :, :] % 25) / timestep_normalize
+        obs[:, 13, :, :] = obs[:, 13, :, :] / timestep_normalize
         obs[:, 19:, :, :] = obs[:, 19:, :, :] / army_normalize
         return obs
 
@@ -149,7 +149,7 @@ class Network(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, amsgrad=True)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.n_steps, eta_min=5e-6
         )

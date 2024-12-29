@@ -73,7 +73,6 @@ trainer = L.Trainer(
     gradient_clip_algorithm="norm",
     callbacks=[checkpoint_callback],
 )
-# trainer = L.Trainer()
 trainer.fit(model, train_dataloaders=dataloader)
 
 # save model
