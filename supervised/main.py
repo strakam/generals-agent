@@ -2,25 +2,23 @@ import os
 import torch
 import lightning as L
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
-from callbacks import EvalCallback
 from network import Network
 
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 # N_SAMPLES = 2 * 106752611
-SEED=7
+SEED = 7
 N_SAMPLES = 2 * 60995855
-BUFFER_SIZE = 16000
+BUFFER_SIZE = 18000
 LEARNING_RATE = 5e-4
-N_CHANNELS = 29
 BATCH_SIZE = 1536
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 10
 # EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
-CLIP_VAL = 3.0
+CLIP_VAL = 1.5
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 
 torch.manual_seed(SEED)
@@ -51,13 +49,13 @@ dataloader = torch.utils.data.DataLoader(
 )
 
 model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(N_CHANNELS, 24, 24), compile=True
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(29, 24, 24), compile=True
 )
 
 checkpoint_callback = ModelCheckpoint(
     dirpath="/storage/praha1/home/strakam3/checkpoints",
     save_top_k=-1,
-    every_n_train_steps=2000,
+    every_n_train_steps=1000,
 )
 
 # eval_callback = EvalCallback(

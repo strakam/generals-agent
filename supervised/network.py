@@ -162,6 +162,26 @@ class Network(L.LightningModule):
             },
         }
 
+    def on_after_backward(self):
+        # Track gradients for high-level modules: backbone, value_head, square_head, direction_head
+        high_level_modules = {
+            "backbone": self.backbone,
+            "value_head": self.value_head,
+            "square_head": self.square_head,
+            "direction_head": self.direction_head,
+        }
+
+        for name, module in high_level_modules.items():
+            # Calculate the norm of the gradients for each module
+            grad_norm = 0
+            for param in module.parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.norm().item() ** 2
+            grad_norm = grad_norm**0.5  # Take the square root to get the total norm
+
+            # Log the gradient norm for this module
+            self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
+
 
 class Pyramid(nn.Module):
     def __init__(
