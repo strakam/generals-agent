@@ -10,6 +10,8 @@ supervised/lightning_logs/
 supervised/wandb/
 supervised/.neptune/
 supervised/checkpoints/
+supervised/highelo/
+checkpoints/
 
 *.tar
 
