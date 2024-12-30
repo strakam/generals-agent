@@ -29,8 +29,8 @@ class NeuroAgent(Agent):
 
     def reset(self):
         self.army_stack = np.zeros((self.history_size, 24, 24))
-        self.army_stack[0, :, :] = np.zeros((24, 24)).astype(bool)
-        self.last_army = np.zeros((24, 24)).astype(bool)
+        self.army_stack[0, :, :] = np.zeros((24, 24)).astype(float)
+        self.last_army = np.zeros((24, 24)).astype(float)
         self.cities = np.zeros((24, 24)).astype(bool)
         self.generals = np.zeros((24, 24)).astype(bool)
         self.mountains = np.zeros((24, 24)).astype(bool)
@@ -60,9 +60,9 @@ class NeuroAgent(Agent):
             maximum_filter(obs["opponent_cells"], size=3).astype(bool),
         )
 
-        self.cities |= obs["cities"]
-        self.generals |= obs["generals"]
-        self.mountains |= obs["mountains"]
+        self.cities |= obs["cities"].astype(bool)
+        self.generals |= obs["generals"].astype(bool)
+        self.mountains |= obs["mountains"].astype(bool)
         return np.stack(
             [
                 obs["armies"],
@@ -102,14 +102,16 @@ class NeuroAgent(Agent):
 
         s, d = self.network(obs, mask)
         s = s[0].detach().numpy()
+        # sample from s via softmax with temperature
+        temp = 0.5
+        s = np.exp(s / temp)
+        s /= s.sum()
+        s = np.random.choice(np.arange(24 * 24), p=s)
         d = d[0].detach().numpy()
-        print(d)
-        s = np.argmax(s)
+        # s = np.argmax(s)
         i, j = divmod(s, 24)
         d = np.argmax(d)
-        print(d, i, j)
         if d == 4:
             return [1, 0, 0, 0, 0]
         action = [0, i, j, d, 0]
-        print(action)
-        return [0, i, j, d, 0]
+        return action

@@ -1,0 +1,10 @@
+- Network (architecture, size)
+- Learning rate (and optimizer), other hparams, sample weights, class weights
+- Features?
+- Training only on the best replays - make bigger dataset?
+- Value function not yet working (tanh?)
+- is50 not working yet, only sending all armies
+- postprocessing ?
+
+
+- Dev dataset?

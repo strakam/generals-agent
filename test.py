@@ -4,9 +4,8 @@ from generals.envs import PettingZooGenerals
 from generals import GridFactory
 from neuro_agent import NeuroAgent
 from network import Network
-from collections import OrderedDict
 
-network = torch.load("checkpoints/epoch=0-step=1000.ckpt", map_location="cpu")
+network = torch.load("checkpoints2/epoch=0-step=60000.ckpt", map_location="cpu")
 state_dict = network["state_dict"]
 model = Network(
     lr=1e-4, n_steps=9, input_dims=(29, 24, 24), compile=True
@@ -20,11 +19,11 @@ neuro = NeuroAgent(model)
 expander = ExpanderAgent()
 
 grid_factory = GridFactory(
-    min_grid_dims=(10, 10),  # Grid height and width are randomly selected
-    max_grid_dims=(15, 15),
-    mountain_density=0.1,  # Expected percentage of mountains
+    min_grid_dims=(15, 15),  # Grid height and width are randomly selected
+    max_grid_dims=(20, 20),
+    mountain_density=0.08,  # Expected percentage of mountains
     city_density=0.05,  # Expected percentage of cities
-    general_positions=[(1, 2), (7, 8)],  # Positions of the generals
+    general_positions=[(1, 2), (12, 13)],  # Positions of the generals
     seed=38,  # Seed to generate the same map every time
 )
 
