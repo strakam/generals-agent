@@ -56,7 +56,7 @@ model = Network(
 checkpoint_callback = ModelCheckpoint(
     dirpath="/storage/praha1/home/strakam3/checkpoints",
     save_top_k=-1,
-    every_n_train_steps=1000,
+    every_n_train_steps=6000,
 )
 
 # eval_callback = EvalCallback(
