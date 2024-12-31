@@ -24,8 +24,8 @@ for replay in tqdm.tqdm(all_replays):
     frames = game["moves"][-1][4]
     stars = game["stars"]
     total.append(frames)
-    if stars[0] > 50 and stars[1] > 50:
-        json.dump(game, open(f"above50/{id}", "w"))
+    if stars[0] > 70 and stars[1] > 70:
+        json.dump(game, open(f"above70/{id}", "w"))
         high_elo_frames += 2 * frames
         passed += 2 * frames - len(game["moves"])
     bins[frames // 100] += 1

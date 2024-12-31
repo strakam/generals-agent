@@ -56,7 +56,7 @@ model = Network(
 checkpoint_callback = ModelCheckpoint(
     dirpath="/storage/praha1/home/strakam3/checkpoints",
     save_top_k=-1,
-    every_n_train_steps=2000,
+    every_n_train_steps=1000,
 )
 
 # eval_callback = EvalCallback(
@@ -66,7 +66,7 @@ checkpoint_callback = ModelCheckpoint(
 # )
 
 trainer = L.Trainer(
-    # logger=neptune_logger,
+    logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,
