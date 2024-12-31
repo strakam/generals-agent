@@ -9,7 +9,7 @@ class Network(L.LightningModule):
         self,
         lr: float = 1e-4,
         n_steps: int = 100000,
-        input_dims: tuple[int, int, int] = (29, 24, 24),
+        input_dims: tuple[int, int, int] = (31, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
         compile: bool = False,
@@ -41,8 +41,8 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.square_loss = nn.CrossEntropyLoss(reduction="none")
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 10])
+        self.square_loss = nn.CrossEntropyLoss()
+        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 5])
         self.direction_loss = nn.CrossEntropyLoss(weight=weights)
         self.value_loss = nn.MSELoss()
 
@@ -59,12 +59,13 @@ class Network(L.LightningModule):
         land_normalize = 200
 
         obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
-        obs[:, 16, :, :] = obs[:, 16, :, :] / army_normalize
+        obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
+
         obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
-        obs[:, 15, :, :] = obs[:, 15, :, :] / land_normalize
+        obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-        obs[:, 13, :, :] = obs[:, 13, :, :] / timestep_normalize
-        obs[:, 19:, :, :] = obs[:, 19:, :, :] / army_normalize
+        obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
+        obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
         return obs
 
     def forward(self, obs, mask, teacher_cells=None):
@@ -72,7 +73,7 @@ class Network(L.LightningModule):
         x = self.backbone(obs)
         # value = self.value_head(x)
 
-        square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9  # cells that i dont own
+        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
         square_logits = self.square_head(x)
         square_logits = (square_logits + square_mask).flatten(1)
 
@@ -103,7 +104,7 @@ class Network(L.LightningModule):
         return square_logits, direction
 
     def training_step(self, batch, batch_idx):
-        obs, mask, values, actions, weights, replay_ids = batch
+        obs, mask, values, actions = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
@@ -111,21 +112,11 @@ class Network(L.LightningModule):
         square, direction = self(obs, mask, target_cell)
 
         # crossentropy loss for square loss and direction loss
-        square_loss = (self.square_loss(square, target_cell.long()) * weights).mean()
+        square_loss = self.square_loss(square, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
         # value_loss = self.value_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss
-        if loss > 10:
-            print(
-                f"Loss is too high on batch {batch_idx},\
-                s: {square_loss.mean():.2f}, d: {direction_loss.mean():.2f}"
-            )
-            # take only last part of ids separated by /
-            replay_ids = [replay_id.split("/")[-1] for replay_id in replay_ids]
-            print(replay_ids)
-            print(F.cross_entropy(square, target_cell.long(), reduction="none"))
-            print(F.cross_entropy(direction, actions[:, 3], reduction="none"))
         # loss
         # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)

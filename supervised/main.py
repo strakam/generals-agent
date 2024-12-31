@@ -7,11 +7,12 @@ from network import Network
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-# N_SAMPLES = 2 * 106752611
 SEED = 7
+DATASET = "above50"
 # N_SAMPLES = 2 * 60995855 # For all new replays
-N_SAMPLES = 2 * 23504481 # For high elo replays
-BUFFER_SIZE = 18000
+N_SAMPLES = 2 * 23504481  # Above 60
+N_SAMPLES = 53_000_000 # Above 50
+BUFFER_SIZE = 800
 LEARNING_RATE = 2e-4
 BATCH_SIZE = 1792
 N_WORKERS = 32
@@ -34,7 +35,7 @@ neptune_logger = NeptuneLogger(
 
 
 # replays = [f"all_replays/old/{name}" for name in os.listdir("all_replays/old/")]
-replays = [f"highelo/{name}" for name in os.listdir("highelo/")]
+replays = [f"{DATASET}/{name}" for name in os.listdir(f"{DATASET}/")]
 
 torch.randperm(len(replays))
 
@@ -49,13 +50,13 @@ dataloader = torch.utils.data.DataLoader(
 )
 
 model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(29, 24, 24), compile=True
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
 )
 
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/storage/praha1/home/strakam3/checkpoints2",
+    dirpath="/storage/praha1/home/strakam3/checkpoints",
     save_top_k=-1,
-    every_n_train_steps=3000,
+    every_n_train_steps=2000,
 )
 
 # eval_callback = EvalCallback(
