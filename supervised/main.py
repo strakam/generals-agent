@@ -8,7 +8,7 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 SEED = 42
-DATASET = "above60"
+DATASET = "highelo"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 # N_SAMPLES = 53_000_000  # Above 50
 N_SAMPLES = 2 * 23504481  # Above 60
