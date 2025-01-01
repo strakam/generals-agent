@@ -12,10 +12,10 @@ DATASET = "above70"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 N_SAMPLES = 2 * 23504481  # Above 60
 N_SAMPLES = 53_000_000  # Above 50
-BUFFER_SIZE = 8000
+BUFFER_SIZE = 18000
 LEARNING_RATE = 2e-4
-BATCH_SIZE = 32  # 1792
-N_WORKERS = 4
+BATCH_SIZE = 1792
+N_WORKERS = 32
 LOG_EVERY_N_STEPS = 20
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
@@ -48,10 +48,14 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
+# model = Network(
+#     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
+# )
+checkpoint = torch.load("epoch=0-step=78000.ckpt")
 model = Network(
     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
 )
-
+model.load_state_dict(checkpoint["state_dict"])
 
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
@@ -60,7 +64,7 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 trainer = L.Trainer(
-    # logger=neptune_logger,
+    logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,
@@ -68,6 +72,10 @@ trainer = L.Trainer(
     gradient_clip_algorithm="norm",
     callbacks=[checkpoint_callback],
 )
+
+for param_group in trainer.optimizers:
+    param_group[0]["lr"] = 5e-5
+
 trainer.fit(model, train_dataloaders=dataloader)
 
 # save model
