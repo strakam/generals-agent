@@ -26,7 +26,7 @@ def visualize_tensor(tensor):
 
     # Slider for navigating slices
     ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03], facecolor="lightgoldenrodyellow")
-    slider = Slider(ax_slider, "Slice", 1, num_slices, valinit=1, valstep=1)
+    slider = Slider(ax_slider, "Slice", 0, num_slices, valinit=0, valstep=1)
 
     # Update function for the slider
     def update(val):
