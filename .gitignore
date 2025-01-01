@@ -13,9 +13,7 @@ supervised/checkpoints/
 supervised/highelo/
 checkpoints/
 checkpoints2/
-supervised/above50/
-supervised/above60/
-supervised/above70/
+datasets/
 
 *.tar
 
