@@ -9,13 +9,12 @@ class Network(L.LightningModule):
         self,
         lr: float = 1e-4,
         n_steps: int = 100000,
-        input_dims: tuple[int, int, int] = (31, 24, 24),
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = input_dims
+        c, h, w = 31, 24, 24
         self.lr = lr
         self.n_steps = n_steps
 

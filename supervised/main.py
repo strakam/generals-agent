@@ -48,9 +48,7 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
-)
+model = Network(lr=LEARNING_RATE, n_steps=MAX_STEPS, compile=True)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
