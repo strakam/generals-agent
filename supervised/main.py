@@ -8,7 +8,7 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 SEED = 7
-DATASET = "above50"
+DATASET = "above70"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 N_SAMPLES = 2 * 23504481  # Above 60
 N_SAMPLES = 53_000_000 # Above 50
@@ -49,9 +49,15 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-model = Network(
-    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
-)
+# model = Network(
+#     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
+# )
+model = Network.load_from_checkpoint("../checkpoints/epoch=0-step=78000.ckpt")
+# Adjust learning rate for the loaded optimizer
+for param_group in model.trainer.optimizers[0].param_groups:
+    param_group['lr'] = 3e-5  # Set your fixed learning rate
+# disable scheduler
+
 
 checkpoint_callback = ModelCheckpoint(
     dirpath="/storage/praha1/home/strakam3/checkpoints",
