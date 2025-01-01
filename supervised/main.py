@@ -7,18 +7,18 @@ from network import Network
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-SEED = 7
-DATASET = "above70"
+SEED = 42
+DATASET = "above60"
 # N_SAMPLES = 2 * 60995855 # For all new replays
+# N_SAMPLES = 53_000_000  # Above 50
 N_SAMPLES = 2 * 23504481  # Above 60
-N_SAMPLES = 53_000_000  # Above 50
 BUFFER_SIZE = 18000
 LEARNING_RATE = 2e-4
 BATCH_SIZE = 1792
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 20
 EVAL_N_GAMES = 5
-N_EPOCHS = 3
+N_EPOCHS = 2
 CLIP_VAL = 2.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 STORAGE = "/storage/praha1/home/strakam3/checkpoints"
@@ -34,7 +34,7 @@ neptune_logger = NeptuneLogger(
 )
 
 
-path = f"../datasets/{DATASET}"
+path = f"datasets/{DATASET}"
 replays = [f"{path}/{name}" for name in os.listdir(path)]
 torch.randperm(len(replays))
 
@@ -48,19 +48,14 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-# model = Network(
-#     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
-# )
-checkpoint = torch.load("epoch=0-step=78000.ckpt")
 model = Network(
     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
 )
-model.load_state_dict(checkpoint["state_dict"])
 
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
     save_top_k=-1,
-    every_n_train_steps=6000,
+    every_n_train_steps=5000,
 )
 
 trainer = L.Trainer(
@@ -72,9 +67,6 @@ trainer = L.Trainer(
     gradient_clip_algorithm="norm",
     callbacks=[checkpoint_callback],
 )
-
-for param_group in trainer.optimizers:
-    param_group[0]["lr"] = 5e-5
 
 trainer.fit(model, train_dataloaders=dataloader)
 

@@ -27,7 +27,7 @@ replay = "verify"
 observations, info = env.reset(options={"replay_file": replay})
 
 done = False
-channel = 26
+channel = 12
 images = []
 agent_to_visualize = "Agent1"
 while not done:
