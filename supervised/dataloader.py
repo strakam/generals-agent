@@ -1,6 +1,6 @@
 from generals.envs import PettingZooGenerals
-from generals.core.action import compute_valid_move_mask
 from generals.agents import RandomAgent
+from generals.core.action import compute_valid_move_mask
 from neuro_agent import NeuroAgent
 import json
 import torch
@@ -16,10 +16,10 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         self.buffer = [
             [
-                np.empty((31, 24, 24), dtype=np.float32),
-                np.empty((24, 24, 4), dtype=np.float32),
-                0.0,
-                np.empty(5, dtype=np.int32),
+                np.empty((31, 24, 24), dtype=np.float32),  # Obs
+                np.empty((24, 24, 4), dtype=np.float32),  # Mask
+                0.0,  # Value
+                np.empty(5, dtype=np.int32),  # Action
             ]
             for _ in range(buffer_size)
         ]
@@ -29,6 +29,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.A, self.B = NeuroAgent(id="red"), NeuroAgent(id="blue")
 
     def check_validity(self, obs, mask, action):
+        # Check if the action is valid, return False if not
         _, i, j, d, _ = action
         army = obs[1][i][j]
         return d == 4 or (mask[i][j][d] == 1 and army > 1)
@@ -45,6 +46,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             np.random.shuffle(self.buffer)
 
     def teacher_action(self, moves, base, timestep):
+        # throw indicates whether action should be used in training
         if timestep in moves:
             action = moves[timestep]
             throw = False
@@ -57,7 +59,6 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         a, b = self.A.id, self.B.id
         map, moves, values, bases, length = self.get_new_replay()
         obs, _ = self.env.reset(options={"grid": map})
-        t = 0
         while True:
             if self.filled:
                 while self.buffer_idx < len(self.buffer):
@@ -67,7 +68,6 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 self.filled = False
             timestep = obs[a]["timestep"]
             # Take teacher actions
-            t += 1
             a0, throw0 = self.teacher_action(moves[0], bases[0], timestep)
             a1, throw1 = self.teacher_action(moves[1], bases[1], timestep)
             actions = {a: a0, b: a1}
@@ -78,13 +78,13 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             obs_b = self.B.last_observation
             mask_a = compute_valid_move_mask(obs[a])
             mask_b = compute_valid_move_mask(obs[b])
+            # Save valid observation/action pairs
             if (
                 self.check_validity(obs_a, mask_a, actions[a])
                 and timestep > 21
                 and not throw0
             ):
                 self.save_sample(obs_a, mask_a, values[0], actions[a])
-
             if (
                 self.check_validity(obs_b, mask_b, actions[b])
                 and timestep > 21

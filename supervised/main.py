@@ -11,17 +11,17 @@ SEED = 7
 DATASET = "above70"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 N_SAMPLES = 2 * 23504481  # Above 60
-N_SAMPLES = 53_000_000 # Above 50
-BUFFER_SIZE = 18000
+N_SAMPLES = 53_000_000  # Above 50
+BUFFER_SIZE = 8000
 LEARNING_RATE = 2e-4
-BATCH_SIZE = 1792
-N_WORKERS = 32
+BATCH_SIZE = 32  # 1792
+N_WORKERS = 4
 LOG_EVERY_N_STEPS = 20
-# EVAL_INTERVAL = 5000
 EVAL_N_GAMES = 5
 N_EPOCHS = 3
 CLIP_VAL = 2.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
+STORAGE = "/storage/praha1/home/strakam3/checkpoints"
 
 torch.manual_seed(SEED)
 torch.set_float32_matmul_precision("high")
@@ -34,9 +34,8 @@ neptune_logger = NeptuneLogger(
 )
 
 
-# replays = [f"all_replays/old/{name}" for name in os.listdir("all_replays/old/")]
-replays = [f"{DATASET}/{name}" for name in os.listdir(f"{DATASET}/")]
-
+path = f"../datasets/{DATASET}"
+replays = [f"{path}/{name}" for name in os.listdir(path)]
 torch.randperm(len(replays))
 
 
@@ -49,30 +48,19 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-# model = Network(
-#     lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
-# )
-model = Network.load_from_checkpoint("../checkpoints/epoch=0-step=78000.ckpt")
-# Adjust learning rate for the loaded optimizer
-for param_group in model.trainer.optimizers[0].param_groups:
-    param_group['lr'] = 3e-5  # Set your fixed learning rate
-# disable scheduler
+model = Network(
+    lr=LEARNING_RATE, n_steps=MAX_STEPS, input_dims=(31, 24, 24), compile=True
+)
 
 
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/storage/praha1/home/strakam3/checkpoints",
+    dirpath=STORAGE,
     save_top_k=-1,
     every_n_train_steps=6000,
 )
 
-# eval_callback = EvalCallback(
-#     network=model,
-#     eval_interval=EVAL_INTERVAL,
-#     n_eval_games=EVAL_N_GAMES,
-# )
-
 trainer = L.Trainer(
-    logger=neptune_logger,
+    # logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,
@@ -83,4 +71,4 @@ trainer = L.Trainer(
 trainer.fit(model, train_dataloaders=dataloader)
 
 # save model
-torch.save(model.state_dict(), "final_network.pt")
+torch.save(model.state_dict(), f"{STORAGE}/final_network.pt")
