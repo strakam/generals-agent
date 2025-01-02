@@ -12,6 +12,7 @@ DATASET = "above70"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 # N_SAMPLES = 53_000_000  # Above 50
 N_SAMPLES = 2 * 23504481  # Above 60
+N_SAMPLE = 9_000_000  # Above 70
 BUFFER_SIZE = 8000
 LEARNING_RATE = 2e-4
 BATCH_SIZE = 32#1792
@@ -53,11 +54,11 @@ model = Network(lr=LEARNING_RATE, n_steps=MAX_STEPS, compile=True)
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
     save_top_k=-1,
-    every_n_train_steps=5000,
+    every_n_train_steps=4000,
 )
 
 trainer = L.Trainer(
-    # logger=neptune_logger,
+    logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,

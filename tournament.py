@@ -27,7 +27,7 @@ def load_agent(path):
 def main():
     min_size = 10
     max_size = 15
-    n_matches = 5
+    n_matches = 8
 
     grid_factory = GridFactory(
         min_grid_dims=(
@@ -46,6 +46,7 @@ def main():
     print(agents)
     winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
     agent_pairs = list(combinations(agents, 2))
+    print(len(agent_pairs))
     for a1, a2 in agent_pairs:
         agent1 = load_agent(f"checkpoints/sup109/{a1}")
         agent2 = load_agent(f"checkpoints/sup109/{a2}")
@@ -71,12 +72,12 @@ def main():
     )
     plt.xticks(
         ticks=np.arange(len(agents)) + 0.5,
-        labels=[agent.id for agent in agents],
+        labels=[agent.split("=")[1] for agent in agents],
         rotation=45,
     )
     plt.yticks(
         ticks=np.arange(len(agents)) + 0.5,
-        labels=[agent.id for agent in agents],
+        labels=[agent.split("=")[1] for agent in agents],
         rotation=0,
     )
     plt.title("Winrates of agents")
