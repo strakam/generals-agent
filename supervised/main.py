@@ -8,14 +8,14 @@ from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 SEED = 42
-DATASET = "highelo"
+DATASET = "above70"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 # N_SAMPLES = 53_000_000  # Above 50
 N_SAMPLES = 2 * 23504481  # Above 60
-BUFFER_SIZE = 18000
+BUFFER_SIZE = 8000
 LEARNING_RATE = 2e-4
-BATCH_SIZE = 1792
-N_WORKERS = 32
+BATCH_SIZE = 32#1792
+N_WORKERS = 4
 LOG_EVERY_N_STEPS = 20
 EVAL_N_GAMES = 5
 N_EPOCHS = 2
@@ -57,7 +57,7 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 trainer = L.Trainer(
-    logger=neptune_logger,
+    # logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,

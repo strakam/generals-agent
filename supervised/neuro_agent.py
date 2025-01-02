@@ -110,7 +110,6 @@ class NeuroAgent(Agent):
         Randomly selects a valid action.
         """
         self.last_observation = self.augment_observation(observation)
-        return [1, 0, 0, 0, 0]
         mask = compute_valid_move_mask(observation)
         mask = np.expand_dims(mask, axis=0)
         obs = np.expand_dims(self.last_observation, axis=0)
@@ -118,7 +117,8 @@ class NeuroAgent(Agent):
         mask = torch.from_numpy(mask).float()
         obs = torch.from_numpy(obs).float()
 
-        v, s, d = self.network(obs, mask)
+        with torch.no_grad():
+            s, d = self.network(obs, mask)
         s = s[0].detach().numpy()
         d = d[0].detach().numpy()
 
@@ -127,4 +127,5 @@ class NeuroAgent(Agent):
         d = np.argmax(d)
         if d == 4:
             return [1, 0, 0, 0, 0]
+        print(f"Action: {s}, {i}, {j}, {d}")
         return [0, i, j, d, 0]

@@ -193,6 +193,9 @@ class Pyramid(nn.Module):
                 skip_channels.append(channels)
             self.encoder_stages.append(stage)
 
+        # self.reception_field_mixture = ConvResBlock(
+        #     stage_channels[-1], stage_channels[-1]
+        # )
         # Decoder stages
         self.decoder_stages = nn.ModuleList()
 
@@ -222,7 +225,6 @@ class Pyramid(nn.Module):
             for block in stage:
                 skip_out, x = block(x)
                 skip_connections.append(skip_out)
-
         for stage in self.decoder_stages:
             for block in stage:
                 skip_in = skip_connections.pop()
