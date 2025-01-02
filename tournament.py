@@ -13,7 +13,7 @@ from itertools import combinations
 def load_agent(path):
     # map location based on the availability
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    network = torch.load(path, map_location=device)
+    network = torch.load(path, map_location=device, weights_only=True)
     state_dict = network["state_dict"]
     model = Network(lr=1e-4, n_steps=9, compile=True)
     model_keys = model.state_dict().keys()
@@ -27,7 +27,7 @@ def load_agent(path):
 def main():
     min_size = 10
     max_size = 15
-    n_matches = 13
+    n_matches = 5
 
     grid_factory = GridFactory(
         min_grid_dims=(
@@ -43,6 +43,7 @@ def main():
     # sort lexicographically
     agents.sort()
     agents = agents[1::2]
+    print(agents)
     winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
     agent_pairs = list(combinations(agents, 2))
     for a1, a2 in agent_pairs:
@@ -50,8 +51,8 @@ def main():
         agent2 = load_agent(f"checkpoints/sup109/{a2}")
         wins = matchup(agent1, agent2, grid_factory, num_games=n_matches)
         print(f"{agent1.id} vs {agent2.id}: {wins}")
-        winrates[agents.index(agent1)][agents.index(agent2)] = wins[agent1.id] / n_matches
-        winrates[agents.index(agent2)][agents.index(agent1)] = wins[agent2.id] / n_matches
+        winrates[agents.index(a1)][agents.index(a2)] = wins[agent1.id] / n_matches
+        winrates[agents.index(a2)][agents.index(a1)] = wins[agent2.id] / n_matches
 
     mask = np.eye(
         len(agents), dtype=bool
