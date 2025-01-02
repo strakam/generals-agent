@@ -67,12 +67,25 @@ class Network(L.LightningModule):
         obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
         return obs
 
+    @torch.compile
+    def prepare_masks(self, obs, direction_mask):
+        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
+        direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
+        pad_h = 24 - direction_mask.shape[2]
+        pad_w = 24 - direction_mask.shape[3]
+        mask = F.pad(direction_mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
+        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
+        direction_mask = torch.cat((mask, zero_layer), dim=1)
+        direction_mask = direction_mask * -1e9
+
+        return square_mask, direction_mask
+
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
         # value = self.value_head(x)
 
-        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
+        square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
         square_logits = (square_logits + square_mask).flatten(1)
 
@@ -83,16 +96,6 @@ class Network(L.LightningModule):
         square_reshaped = (
             F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         )
-
-        mask = 1 - mask.permute(0, 3, 1, 2)
-        # pad spatial dimension of mask to 24x24, with value 1
-        pad_h = 24 - mask.shape[2]
-        pad_w = 24 - mask.shape[3]
-        mask = F.pad(mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
-        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
-        direction_mask = torch.cat((mask, zero_layer), dim=1)
-        direction_mask = direction_mask * -1e9
-
         representation_with_square = torch.cat((x, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
@@ -110,7 +113,6 @@ class Network(L.LightningModule):
 
         square, direction = self(obs, mask, target_cell)
 
-        # crossentropy loss for square loss and direction loss
         square_loss = self.square_loss(square, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
         # value_loss = self.value_loss(value.flatten(), values)
