@@ -33,4 +33,4 @@ def matchup(agent1, agent2, gf, num_games=10, render_mode=None):
         print(f"Game length {t}.")
         print(f"Time spend thinking: {time_spend_thinking}")
         print(f"Game time: {time.time() - game_start}")
-    return win_count / num_games
+    return win_count

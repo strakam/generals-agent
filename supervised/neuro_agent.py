@@ -127,5 +127,4 @@ class NeuroAgent(Agent):
         d = np.argmax(d)
         if d == 4:
             return [1, 0, 0, 0, 0]
-        print(f"Action: {s}, {i}, {j}, {d}")
         return [0, i, j, d, 0]

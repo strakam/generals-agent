@@ -7,6 +7,7 @@ from generals import GridFactory
 from supervised.network import Network
 from supervised.neuro_agent import NeuroAgent
 from utils.tournament import matchup
+from itertools import combinations
 
 
 def load_agent(path):
@@ -24,9 +25,9 @@ def load_agent(path):
 
 
 def main():
-    min_size = 15
-    max_size = 23
-    n_matches = 20
+    min_size = 10
+    max_size = 15
+    n_matches = 13
 
     grid_factory = GridFactory(
         min_grid_dims=(
@@ -39,16 +40,18 @@ def main():
         seed=38,  # Seed to generate the same map every time
     )
     agents = [path for path in os.listdir("checkpoints/sup109")]
+    # sort lexicographically
+    agents.sort()
+    agents = agents[1::2]
     winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
-    for agent1_path in agents:
-        agent1 = load_agent(f"checkpoints/sup109/{agent1_path}")
-        for agent2_path in agents:
-            if agent1_path == agent2_path:
-                continue
-            agent2 = load_agent(f"checkpoints/sup109/{agent2_path}")
-            wins = matchup(agent1, agent2, grid_factory, num_games=n_matches)
-            print(f"{agent1.id} vs {agent2.id}: {wins}")
-            winrates[agents.index(agent1)][agents.index(agent2)] = wins[agent1.id]
+    agent_pairs = list(combinations(agents, 2))
+    for a1, a2 in agent_pairs:
+        agent1 = load_agent(f"checkpoints/sup109/{a1}")
+        agent2 = load_agent(f"checkpoints/sup109/{a2}")
+        wins = matchup(agent1, agent2, grid_factory, num_games=n_matches)
+        print(f"{agent1.id} vs {agent2.id}: {wins}")
+        winrates[agents.index(agent1)][agents.index(agent2)] = wins[agent1.id] / n_matches
+        winrates[agents.index(agent2)][agents.index(agent1)] = wins[agent2.id] / n_matches
 
     mask = np.eye(
         len(agents), dtype=bool
