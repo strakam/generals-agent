@@ -4,7 +4,10 @@
 - Training only on the best replays - make bigger dataset?
 - Value function not yet working (tanh?)
 - is50 not working yet, only sending all armies
+- smaller dataset with higher quality data better (?)
 - postprocessing ?
+
+- CAREFUL WITH ARGMAX AND SAMPLING
 
 
 - Dev dataset?

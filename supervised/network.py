@@ -100,7 +100,6 @@ class Network(L.LightningModule):
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
 
-        # take argmax
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
         return square_logits, direction

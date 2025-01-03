@@ -40,6 +40,8 @@ class NeuroAgent(Agent):
 
         self.last_observation = np.zeros((31, 24, 24))
 
+
+
     def augment_observation(self, obs: Observation) -> np.ndarray:
         _obs = {}
         for k, channel in obs.items():
