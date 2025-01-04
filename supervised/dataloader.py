@@ -59,7 +59,9 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         a, b = self.A.id, self.B.id
-        map, moves, values, bases, length, stars = self.get_new_replay()
+        while True:
+            map, moves, values, bases, length, stars = self.get_new_replay()
+
         obs, _ = self.env.reset(options={"grid": map})
         while True:
             if self.filled:
@@ -128,6 +130,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 direction = 1
             elif move[2] == move[1] - game["mapWidth"]:
                 direction = 0
+            else:
+                direction = 4
             player_moves[index][turn] = [0, i, j, direction, is50]
 
         # calculate game length as time of the last move
