@@ -130,7 +130,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             elif move[2] == move[1] - game["mapWidth"]:
                 direction = 0
             else:
-                direction = 4
+                continue  # very few replays have moves that dont do anything
             player_moves[index][turn] = [0, i, j, direction, is50]
 
         # calculate game length as time of the last move
