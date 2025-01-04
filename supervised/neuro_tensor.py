@@ -137,7 +137,6 @@ class NeuroAgent(Agent):
         # use termperature to control randomness
         square = torch.argmax(square, dim=1)
         direction = torch.argmax(direction, dim=1)
-        # take values in s and divide by // 24
         row = square // 24
         col = square % 24
         zeros = torch.zeros(self.batch_size)

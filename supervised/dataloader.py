@@ -1,5 +1,4 @@
 from generals.envs import PettingZooGenerals
-from generals.agents import RandomAgent
 from generals.core.action import compute_valid_move_mask
 from neuro_agent import NeuroAgent
 import json
@@ -28,11 +27,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.filled = False
         self.A, self.B = NeuroAgent(id="red"), NeuroAgent(id="blue")
 
-    def check_validity(self, obs, mask, action):
+    def check_validity(self, obs, mask, action, stars):
         # Check if the action is valid, return False if not
         _, i, j, d, _ = action
         army = obs[1][i][j]
-        return d == 4 or (mask[i][j][d] == 1 and army > 1)
+        passing = d == 4
+        valid_move = d < 4 and mask[i][j][d] == 1 and army > 1
+        is_high_elo = stars
+        return is_high_elo and (passing or valid_move)
 
     def save_sample(self, obs, mask, value, action):
         self.buffer[self.buffer_idx][0][:] = obs
@@ -57,7 +59,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         a, b = self.A.id, self.B.id
-        map, moves, values, bases, length = self.get_new_replay()
+        map, moves, values, bases, length, stars = self.get_new_replay()
         obs, _ = self.env.reset(options={"grid": map})
         while True:
             if self.filled:
@@ -80,20 +82,20 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             mask_b = compute_valid_move_mask(obs[b])
             # Save valid observation/action pairs
             if (
-                self.check_validity(obs_a, mask_a, actions[a])
+                self.check_validity(obs_a, mask_a, actions[a], stars[0])
                 and timestep > 21
                 and not throw0
             ):
                 self.save_sample(obs_a, mask_a, values[0], actions[a])
             if (
-                self.check_validity(obs_b, mask_b, actions[b])
+                self.check_validity(obs_b, mask_b, actions[b], stars[1])
                 and timestep > 21
                 and not throw1
             ):
                 self.save_sample(obs_b, mask_b, values[1], actions[b])
             obs, _, terminated, _, _ = self.env.step(actions)
             if all(terminated.values()) or timestep >= length:
-                map, moves, values, bases, length = self.get_new_replay()
+                map, moves, values, bases, length, stars = self.get_new_replay()
                 obs, _ = self.env.reset(options={"grid": map})
                 self.A.reset()
                 self.B.reset()
@@ -106,6 +108,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         player_moves = [{}, {}]
         player_values = [-1.0, -1.0]
+        player_stars = game["stars"]
 
         # Determine winner
         if len(game["afks"]) == 0:
@@ -162,7 +165,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         map_str = "\n".join(["".join(row) for row in map])
         self.replay_idx += 1
         self.replay_idx %= len(self.replays)
-        return (map_str, player_moves, player_values, player_bases, game_length)
+        return (
+            map_str,
+            player_moves,
+            player_values,
+            player_bases,
+            game_length,
+            player_stars,
+        )
 
 
 def per_worker_init_fn(worker_id):
@@ -180,12 +190,7 @@ def per_worker_init_fn(worker_id):
     print(f"Worker {worker_id} handling replays {start} to {end}")
     print(f"Worker {worker_id} {dataset.replays[:3]}")
 
-    dataset.env = PettingZooGenerals(
-        agents={
-            "red": RandomAgent("red"),
-            "blue": RandomAgent("blue"),
-        },
-    )
+    dataset.env = PettingZooGenerals(agents=["red", "blue"])
 
 
 def collate_fn(batch):
