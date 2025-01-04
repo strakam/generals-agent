@@ -59,8 +59,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         a, b = self.A.id, self.B.id
-        while True:
-            map, moves, values, bases, length, stars = self.get_new_replay()
+        map, moves, values, bases, length, stars = self.get_new_replay()
 
         obs, _ = self.env.reset(options={"grid": map})
         while True:
