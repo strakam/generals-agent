@@ -20,7 +20,7 @@ BATCH_SIZE = 1792
 N_WORKERS = 32
 LOG_EVERY_N_STEPS = 20
 EVAL_N_GAMES = 5
-N_EPOCHS = 2
+N_EPOCHS = 4
 CLIP_VAL = 2.0
 MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
 STORAGE = "/storage/praha1/home/strakam3/checkpoints"
@@ -50,7 +50,10 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-model = Network(lr=LEARNING_RATE, n_steps=MAX_STEPS, compile=True)
+channel_sequence = [320, 384, 448, 448]
+model = Network(
+    lr=LEARNING_RATE, channel_sequence=channel_sequence, n_steps=MAX_STEPS, compile=True
+)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
@@ -59,7 +62,7 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 trainer = L.Trainer(
-    # logger=neptune_logger,
+    logger=neptune_logger,
     log_every_n_steps=LOG_EVERY_N_STEPS,
     max_steps=MAX_STEPS,
     max_epochs=-1,
