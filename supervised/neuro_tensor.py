@@ -57,12 +57,14 @@ class NeuroAgent(Agent):
         timestep = 13
         priority = 14
 
-        self.army_stack[:, 1:, :, :] = self.army_stack[:, :-1, :, :]
+        army_stack_clone = self.army_stack.clone()  # can't do inplace otherwise
+        enemy_stack_clone = self.enemy_stack.clone()
+        self.army_stack[:, 1:, :, :] = army_stack_clone[:, :-1, :, :]
         self.army_stack[:, 0, :, :] = (
             obs[:, armies, :, :] * obs[:, owned_cells, :, :] - self.last_army
         )
 
-        self.enemy_stack[:, 1:, :, :] = self.enemy_stack[:, :-1, :, :]
+        self.enemy_stack[:, 1:, :, :] = enemy_stack_clone[:, :-1, :, :]
         self.enemy_stack[:, 0, :, :] = (
             obs[:, armies, :, :] * obs[:, opponent_cells, :, :] - self.last_enemy_army
         )
@@ -115,7 +117,7 @@ class NeuroAgent(Agent):
             dim=1,
         )
         army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
-        augmented_obs = torch.cat([channels, army_stacks], dim=1)
+        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
         self.last_observation = augmented_obs
         return augmented_obs
 
@@ -140,4 +142,6 @@ class NeuroAgent(Agent):
         row = square // 24
         col = square % 24
         zeros = torch.zeros(self.batch_size)
-        return torch.stack([zeros, row, col, direction, zeros], dim=1).numpy()
+        return (
+            torch.stack([zeros, row, col, direction, zeros], dim=1).numpy().astype(int)
+        )
