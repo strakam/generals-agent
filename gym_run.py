@@ -75,5 +75,6 @@ while ended < 100:
                 if game[3] == 1:
                     wins[agent] += 1
                     ended += 1
+        print(wins)
     print(f"Time {t}, ended {ended}")
 print(wins)
