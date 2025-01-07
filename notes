@@ -9,6 +9,7 @@
 
 - CAREFUL WITH ARGMAX AND SAMPLING
 
+- train without its previous actions?
 
 - Dev dataset?
 
@@ -24,3 +25,21 @@ https://bot.generals.io/replays/kD-AoxK1K -- I won! long game, nice defense from
 https://bot.generals.io/replays/L9Drlub3s -- I won! nice pressure but i did surpise attack
 
 
+Strongest: ...
+
+
+112: 2 
+114: 8
+Both ~ 50k
+
+game vs eklipzai https://bot.generals.io/replays/2lWNnfnAW
+https://bot.generals.io/replays/yEQGogdnS !!! miracle move fr
+https://bot.generals.io/replays/HDtAy3Cm7 lost vs eklipzai, had advantage but didnt defend
+
+
+
+TODOS:
+- 1. evaluation workflow (checkpoints)
+- 4. training run without conditioning on previous actions
+- 5. precompile model
+-----------

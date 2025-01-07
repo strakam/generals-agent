@@ -129,7 +129,9 @@ class NeuroAgent(Agent):
         """
         Based on a new observation, augment the internal state and return an action.
         """
-        self.augment_observation(obs)  # obs will be converted to tensor here
+        if isinstance(obs, np.ndarray):
+            obs = torch.from_numpy(obs).float()
+        self.augment_observation(obs)
         mask = torch.from_numpy(mask).float()
 
         with torch.no_grad():
@@ -139,10 +141,9 @@ class NeuroAgent(Agent):
         direction = torch.argmax(direction, dim=1)
         row = square // 24
         col = square % 24
-        zeros = torch.zeros(self.batch_size)  # For now we don't pass moves
-        return (  # Compose actions
-            torch.stack([zeros, row, col, direction, zeros], dim=1).numpy().astype(int)
-        )
+        zeros = torch.zeros(self.batch_size)
+        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        return actions.numpy().astype(int)
 
 
 class OnlineAgent(NeuroAgent):
@@ -166,5 +167,3 @@ class OnlineAgent(NeuroAgent):
         if action[3] == 4:
             return [1, 0, 0, 0, 0]
         return action
-
-

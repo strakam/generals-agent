@@ -10,7 +10,7 @@ from checkpoints.sup112.network import Network
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--lobby", default=True, type=str, help="Replay ID")
+parser.add_argument("--lobby", default=None, type=str, help="Replay ID")
 parser.add_argument("--public", default=False, action="store_true", help="Public lobby")
 
 
@@ -36,7 +36,7 @@ def main(args):
                 else:
                     # Sleep only in 1v1 queue
                     client.join_1v1_queue()
-                    timeout = np.random.randint(30, 90)
+                    timeout = np.random.randint(10, 20)
                     print("Sleeping for", timeout, "seconds")
                     time.sleep(timeout)
             if client.status == "lobby":
