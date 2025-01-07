@@ -1,8 +1,10 @@
 import torch
 import numpy as np
-from generals.core.game import Action
+from generals.core.action import Action, compute_valid_move_mask
 import lightning as L
 from generals.agents import Agent
+from generals.core.observation import Observation
+from torch.nn.functional import max_pool2d as max_pool2d
 
 
 class NeuroAgent(Agent):
@@ -10,37 +12,41 @@ class NeuroAgent(Agent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        color: tuple[int, int, int] = (242, 61, 106),
-        replay_moves: dict[int, list[int]] | None = None,
-        general_position: tuple[int, int] | None = None,
         history_size: int | None = 5,
         batch_size: int | None = 1,
     ):
-        super().__init__(id, color)
+        super().__init__(id)
         self.network = network
-
-        self.replay_moves = replay_moves
-        self.general_position = general_position
         self.history_size = history_size
         self.batch_size = batch_size
 
         self.reset()
 
+    @torch.compile
     def reset(self):
+        """
+        Reset the agent's internal state.
+        The state contains things that the agent remembers over time (positions of generals, etc.).
+        """
+        shape = (self.batch_size, 24, 24)
+        n_channels = 21 + 2 * self.history_size
         self.army_stack = torch.zeros((self.batch_size, self.history_size, 24, 24))
         self.enemy_stack = torch.zeros((self.batch_size, self.history_size, 24, 24))
-        self.last_army = torch.zeros((self.batch_size, 24, 24))
-        self.last_enemy_army = torch.zeros((self.batch_size, 24, 24))
-        self.cities = torch.zeros((self.batch_size, 24, 24)).bool()
-        self.generals = torch.zeros((self.batch_size, 24, 24)).bool()
-        self.mountains = torch.zeros((self.batch_size, 24, 24)).bool()
-        self.seen = torch.zeros((self.batch_size, 24, 24)).bool()
-        self.enemy_seen = torch.zeros((self.batch_size, 24, 24)).bool()
+        self.last_army = torch.zeros(shape)
+        self.last_enemy_army = torch.zeros(shape)
+        self.cities = torch.zeros(shape).bool()
+        self.generals = torch.zeros(shape).bool()
+        self.mountains = torch.zeros(shape).bool()
+        self.seen = torch.zeros(shape).bool()
+        self.enemy_seen = torch.zeros(shape).bool()
+        self.last_observation = torch.zeros((self.batch_size, n_channels, 24, 24))
 
-        self.last_observation = torch.zeros((self.batch_size, 31, 24, 24))
-
-    def augment_observation(self, obs: np.ndarray) -> torch.Tensor:
-        obs = torch.from_numpy(obs)
+    @torch.compile
+    def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Here the agent augments what it knows about the game with the new observation.
+        This is then further used to make a decision.
+        """
         armies = 0
         generals = 1
         cities = 2
@@ -72,17 +78,14 @@ class NeuroAgent(Agent):
         self.last_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
         self.last_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
-        # maximum filter as F.max_pool2d with kernel_size=3 and stride=1, padding=1
         self.seen = torch.logical_or(
             self.seen,
-            torch.nn.functional.max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
+            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
         )
 
         self.enemy_seen = torch.logical_or(
             self.enemy_seen,
-            torch.nn.functional.max_pool2d(
-                obs[:, opponent_cells, :, :], 3, 1, 1
-            ).bool(),
+            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
         )
 
         self.cities |= obs[:, cities, :, :].bool()
@@ -121,27 +124,47 @@ class NeuroAgent(Agent):
         self.last_observation = augmented_obs
         return augmented_obs
 
-    def act(self, obs: np.ndarray, mask: np.ndarray | None = None) -> Action:
+    @torch.compile
+    def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
         """
-        Randomly selects a valid action.
+        Based on a new observation, augment the internal state and return an action.
         """
         self.augment_observation(obs)  # obs will be converted to tensor here
         mask = torch.from_numpy(mask).float()
 
-        assert len(obs.shape) == len(mask.shape)
-        if len(obs.shape) == 3:
-            obs = obs.unsqueeze(0)
-            mask = mask.unsqueeze(0)
-
         with torch.no_grad():
             square, direction = self.network(self.last_observation, mask)
 
-        # use termperature to control randomness
         square = torch.argmax(square, dim=1)
         direction = torch.argmax(direction, dim=1)
         row = square // 24
         col = square % 24
-        zeros = torch.zeros(self.batch_size)
-        return (
+        zeros = torch.zeros(self.batch_size)  # For now we don't pass moves
+        return (  # Compose actions
             torch.stack([zeros, row, col, direction, zeros], dim=1).numpy().astype(int)
         )
+
+
+class OnlineAgent(NeuroAgent):
+    def __init__(
+        self,
+        network: L.LightningModule | None = None,
+        id: str = "Neuro",
+        history_size: int | None = 5,
+        batch_size: int | None = 1,
+    ):
+        super().__init__(network, id, history_size, batch_size)
+        self.batch_size = 1  # Online agent only supports batch size of 1
+
+    def act(self, obs: Observation) -> Action:
+        """
+        Based on a new observation, augment the internal state and return an action.
+        """
+        mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor(pad_to=24)).unsqueeze(0)
+        action = super().act(obs, mask)[0]  # Take the only action
+        if action[3] == 4:
+            return [1, 0, 0, 0, 0]
+        return action
+
+
