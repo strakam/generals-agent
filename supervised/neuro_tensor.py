@@ -167,3 +167,26 @@ class OnlineAgent(NeuroAgent):
         if action[3] == 4:
             return [1, 0, 0, 0, 0]
         return action
+
+    def precompile(self):
+        # Run the agent once to precompile the code
+        self.reset()
+        self.augment_observation(torch.zeros((1, 15, 24, 24)))
+        obs = Observation(
+            armies=np.zeros((24, 24)),
+            generals=np.zeros((24, 24)),
+            cities=np.zeros((24, 24)),
+            mountains=np.zeros((24, 24)),
+            neutral_cells=np.zeros((24, 24)),
+            owned_cells=np.zeros((24, 24)),
+            opponent_cells=np.zeros((24, 24)),
+            fog_cells=np.zeros((24, 24)),
+            structures_in_fog=np.zeros((24, 24)),
+            owned_land_count=0,
+            owned_army_count=0,
+            opponent_land_count=0,
+            opponent_army_count=0,
+            timestep=0,
+        )
+        self.act(obs)
+        print("Precompiled the agent")

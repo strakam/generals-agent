@@ -6,7 +6,7 @@ from supervised.network import Network
 from supervised.neuro_tensor import NeuroAgent
 from generals import GridFactory
 
-n_envs = 10
+n_envs = 2
 
 
 # Store agents in a dictionary - they are called by id, which will come handy
@@ -71,7 +71,6 @@ while ended < 100:
         for agent in agent_names:
             outputs = infos[agent]
             for game in outputs:
-                print(game)
                 if game[3] == 1:
                     wins[agent] += 1
                     ended += 1
