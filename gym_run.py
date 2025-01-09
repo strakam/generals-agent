@@ -1,3 +1,4 @@
+import neptune
 import numpy as np
 import gymnasium as gym
 import torch
@@ -6,22 +7,23 @@ from supervised.network import Network
 from supervised.neuro_tensor import NeuroAgent
 from generals import GridFactory
 
-n_envs = 24
+n_envs = 36
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+key_file = open("neptune_token.txt", "r")
+key = key_file.read()
+run = neptune.init_run(
+    project="strakam/supervised-agent",
+    api_token=key,
+)
 
-# Store agents in a dictionary - they are called by id, which will come handy
-def load_agent(path, channel_sequence=None):
+
+def load_agent(path, channel_sequence=[256, 320, 384, 384]) -> NeuroAgent:
     # Map location based on availability
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     network = torch.load(path, map_location=device)
     state_dict = network["state_dict"]
-    if channel_sequence is not None:
-        model = Network(
-            lr=1e-4, n_steps=9, channel_sequence=channel_sequence, compile=True
-        )
-    else:
-        model = Network(lr=1e-4, n_steps=9, compile=True)
+    model = Network(channel_sequence=channel_sequence, compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
@@ -33,7 +35,7 @@ def load_agent(path, channel_sequence=None):
 
 
 gf = GridFactory(
-    min_grid_dims=(10, 10),
+    min_grid_dims=(15, 15),
     max_grid_dims=(24, 24),
 )
 
@@ -79,6 +81,9 @@ while ended < 100:
                 if game[3] == 1:
                     wins[agent] += 1
                     ended += 1
+                    other_agent = [a for a in agent_names if a != agent][0]
+                    run["winrate/{}".format(agent)].log(wins[agent]/ended)
+                    run["winrate/{}".format(other_agent)].log(wins[other_agent]/ended)
         print(wins)
     print(f"Time {t}, ended {ended}")
 print(wins)
