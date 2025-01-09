@@ -153,7 +153,7 @@ class NeuroAgent(Agent):
         direction = torch.argmax(direction, dim=1)
         row = square // 24
         col = square % 24
-        zeros = torch.zeros(self.batch_size)
+        zeros = torch.zeros(self.batch_size).to(self.device)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         return actions.cpu().numpy().astype(int)
 
