@@ -155,6 +155,8 @@ class NeuroAgent(Agent):
         col = square % 24
         zeros = torch.zeros(self.batch_size).to(self.device)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        # actions, where direction is 4, set the first value to 1
+        actions[actions[:, 3] == 4, 0] = 1
         return actions.cpu().numpy().astype(int)
 
 

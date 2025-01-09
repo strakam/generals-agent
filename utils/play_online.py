@@ -33,7 +33,6 @@ def main(args):
         while True:
             if client.status == "off":
                 agent.reset()
-                print("agent reset")
                 if args.lobby is not None:
                     client.join_private_lobby(args.lobby)
                 else:
