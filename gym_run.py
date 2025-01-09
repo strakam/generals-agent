@@ -41,10 +41,10 @@ gf = GridFactory(
 
 agents = {
     "agent1": load_agent(
-        "checkpoints/sup119/epoch=0-step=40000.ckpt",
+        "checkpoints/epoch=0-step=40000.ckpt",
         channel_sequence=[320, 384, 448, 448],
     ),
-    "agent2": load_agent("checkpoints/sup114/epoch=0-step=52000.ckpt"),
+    "agent2": load_agent("checkpoints/epoch=0-step=52000.ckpt"),
 }
 agent_names = ["agent1", "agent2"]
 
@@ -82,8 +82,8 @@ while ended < 100:
                     wins[agent] += 1
                     ended += 1
                     other_agent = [a for a in agent_names if a != agent][0]
-                    run["winrate/{}".format(agent)].log(wins[agent]/ended)
-                    run["winrate/{}".format(other_agent)].log(wins[other_agent]/ended)
+                    run["winrate/{}".format(agent)].log(wins[agent] / ended)
+                    run["winrate/{}".format(other_agent)].log(wins[other_agent] / ended)
         print(wins)
     print(f"Time {t}, ended {ended}")
 print(wins)
