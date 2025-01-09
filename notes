@@ -44,5 +44,4 @@ https://bot.generals.io/replays/HDtAy3Cm7 lost vs eklipzai, had advantage but di
 TODOS:
 - 1. evaluation workflow (checkpoints)
 - 4. training run without conditioning on previous actions
-- 5. precompile model
 -----------

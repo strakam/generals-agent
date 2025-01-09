@@ -6,7 +6,8 @@ from supervised.network import Network
 from supervised.neuro_tensor import NeuroAgent
 from generals import GridFactory
 
-n_envs = 2
+n_envs = 24
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Store agents in a dictionary - they are called by id, which will come handy
@@ -16,14 +17,18 @@ def load_agent(path, channel_sequence=None):
     network = torch.load(path, map_location=device)
     state_dict = network["state_dict"]
     if channel_sequence is not None:
-        model = Network(lr=1e-4, n_steps=9, channel_sequence=channel_sequence, compile=True)
+        model = Network(
+            lr=1e-4, n_steps=9, channel_sequence=channel_sequence, compile=True
+        )
     else:
         model = Network(lr=1e-4, n_steps=9, compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
     model.eval()
-    agent = NeuroAgent(model, id=path.split("/")[-1].split(".")[0], batch_size=n_envs)
+    agent = NeuroAgent(
+        model, id=path.split("/")[-1].split(".")[0], batch_size=n_envs, device=device
+    )
     return agent
 
 

@@ -14,11 +14,18 @@ class NeuroAgent(Agent):
         id: str = "Neuro",
         history_size: int | None = 5,
         batch_size: int | None = 1,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
         super().__init__(id)
         self.network = network
         self.history_size = history_size
         self.batch_size = batch_size
+        self.device = device
+
+        if self.network is not None:
+            self.network.to(device)
 
         self.reset()
 
@@ -28,18 +35,23 @@ class NeuroAgent(Agent):
         Reset the agent's internal state.
         The state contains things that the agent remembers over time (positions of generals, etc.).
         """
-        shape = (self.batch_size, 24, 24)
         n_channels = 21 + 2 * self.history_size
-        self.army_stack = torch.zeros((self.batch_size, self.history_size, 24, 24))
-        self.enemy_stack = torch.zeros((self.batch_size, self.history_size, 24, 24))
-        self.last_army = torch.zeros(shape)
-        self.last_enemy_army = torch.zeros(shape)
-        self.cities = torch.zeros(shape).bool()
-        self.generals = torch.zeros(shape).bool()
-        self.mountains = torch.zeros(shape).bool()
-        self.seen = torch.zeros(shape).bool()
-        self.enemy_seen = torch.zeros(shape).bool()
-        self.last_observation = torch.zeros((self.batch_size, n_channels, 24, 24))
+        shape = (self.batch_size, 24, 24)
+        history_shape = (self.batch_size, self.history_size, 24, 24)
+
+        device = self.device
+        self.army_stack = torch.zeros(history_shape, device=device)
+        self.enemy_stack = torch.zeros(history_shape, device=device)
+        self.last_army = torch.zeros(shape, device=device)
+        self.last_enemy_army = torch.zeros(shape, device=device)
+        self.cities = torch.zeros(shape, device=device).bool()
+        self.generals = torch.zeros(shape, device=device).bool()
+        self.mountains = torch.zeros(shape, device=device).bool()
+        self.seen = torch.zeros(shape, device=device).bool()
+        self.enemy_seen = torch.zeros(shape, device=device).bool()
+        self.last_observation = torch.zeros(
+            (self.batch_size, n_channels, 24, 24), device=device
+        )
 
     @torch.compile
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
@@ -130,9 +142,9 @@ class NeuroAgent(Agent):
         Based on a new observation, augment the internal state and return an action.
         """
         if isinstance(obs, np.ndarray):
-            obs = torch.from_numpy(obs).float()
+            obs = torch.from_numpy(obs).float().to(self.device)
         self.augment_observation(obs)
-        mask = torch.from_numpy(mask).float()
+        mask = torch.from_numpy(mask).float().to(self.device)
 
         with torch.no_grad():
             square, direction = self.network(self.last_observation, mask)
@@ -143,7 +155,7 @@ class NeuroAgent(Agent):
         col = square % 24
         zeros = torch.zeros(self.batch_size)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
-        return actions.numpy().astype(int)
+        return actions.cpu().numpy().astype(int)
 
 
 class OnlineAgent(NeuroAgent):
@@ -152,10 +164,12 @@ class OnlineAgent(NeuroAgent):
         network: L.LightningModule | None = None,
         id: str = "Neuro",
         history_size: int | None = 5,
-        batch_size: int | None = 1,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
-        super().__init__(network, id, history_size, batch_size)
-        self.batch_size = 1  # Online agent only supports batch size of 1
+        super().__init__(network, id, history_size, 1, device)
+        self.network.eval()
 
     def act(self, obs: Observation) -> Action:
         """
