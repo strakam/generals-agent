@@ -75,8 +75,8 @@ class NeuroAgent(Agent):
         timestep = 13
         priority = 14
 
-        army_stack_clone = self.army_stack.clone()  # can't do inplace otherwise
-        enemy_stack_clone = self.enemy_stack.clone()
+        army_stack_clone = self.army_stack.clone().to(self.device)
+        enemy_stack_clone = self.enemy_stack.clone().to(self.device)
         self.army_stack[:, 1:, :, :] = army_stack_clone[:, :-1, :, :]
         self.army_stack[:, 0, :, :] = (
             obs[:, armies, :, :] * obs[:, owned_cells, :, :] - self.last_army
@@ -104,7 +104,7 @@ class NeuroAgent(Agent):
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
 
-        ones = torch.ones((self.batch_size, 24, 24))
+        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
         channels = torch.stack(
             [
                 obs[:, armies, :, :],
