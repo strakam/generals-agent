@@ -1,6 +1,6 @@
 from generals.envs import PettingZooGenerals
 from generals.core.action import compute_valid_move_mask
-from neuro_agent import NeuroAgent
+from neuro_tensor import SupervisedAgent
 import json
 import torch
 import math
@@ -25,7 +25,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.current_replay = None
         self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
-        self.A, self.B = NeuroAgent(id="red"), NeuroAgent(id="blue")
+        self.A, self.B = SupervisedAgent(id="red"), SupervisedAgent(id="blue")
 
     def check_validity(self, obs, mask, action, stars):
         # Check if the action is valid, return False if not
@@ -77,8 +77,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             # Ignore these actions, just process observations
             _ = self.A.act(obs[a])
             _ = self.B.act(obs[b])
-            obs_a = self.A.last_observation
-            obs_b = self.B.last_observation
+            obs_a = self.A.last_observation[0]
+            obs_b = self.B.last_observation[0]
             mask_a = compute_valid_move_mask(obs[a])
             mask_b = compute_valid_move_mask(obs[b])
             # Save valid observation/action pairs
@@ -95,7 +95,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
             ):
                 self.save_sample(obs_b, mask_b, values[1], actions[b])
             obs, _, terminated, _, _ = self.env.step(actions)
-            if all(terminated.values()) or timestep >= length:
+            if terminated or timestep >= length:
                 map, moves, values, bases, length, stars = self.get_new_replay()
                 obs, _ = self.env.reset(options={"grid": map})
                 self.A.reset()
@@ -193,7 +193,7 @@ def per_worker_init_fn(worker_id):
     print(f"Worker {worker_id} handling replays {start} to {end}")
     print(f"Worker {worker_id} {dataset.replays[:3]}")
 
-    dataset.env = PettingZooGenerals(agents=["red", "blue"])
+    dataset.env = PettingZooGenerals(agent_ids=["red", "blue"])
 
 
 def collate_fn(batch):

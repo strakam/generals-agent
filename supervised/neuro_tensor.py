@@ -178,7 +178,7 @@ class OnlineAgent(NeuroAgent):
         Based on a new observation, augment the internal state and return an action.
         """
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
-        obs = torch.tensor(obs.as_tensor(pad_to=24)).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action = super().act(obs, mask)[0]  # Take the only action
         if action[3] == 4:
             return [1, 0, 0, 0, 0]
@@ -203,6 +203,23 @@ class OnlineAgent(NeuroAgent):
             opponent_land_count=0,
             opponent_army_count=0,
             timestep=0,
+            priority=0,
         )
         self.act(obs)
         print("Precompiled the agent")
+
+
+class SupervisedAgent(NeuroAgent):
+    def __init__(
+        self,
+        network: L.LightningModule | None = None,
+        id: str = "Neuro",
+        history_size: int | None = 5,
+        device: torch.device = "cpu",
+    ):
+        super().__init__(network, id, history_size, 1, device)
+
+    def act(self, obs: Observation) -> Action:
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        self.augment_observation(obs)
+        return [1, 0, 0, 0, 0]  # pass

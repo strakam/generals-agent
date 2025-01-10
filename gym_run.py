@@ -2,12 +2,12 @@ import neptune
 import numpy as np
 import gymnasium as gym
 import torch
-from generals.envs import MultiAgentGymnasiumGenerals
+from generals.envs import GymnasiumGenerals
 from supervised.network import Network
 from supervised.neuro_tensor import NeuroAgent
 from generals import GridFactory
 
-n_envs = 36
+n_envs = 3
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 key_file = open("neptune_token.txt", "r")
@@ -51,8 +51,8 @@ agent_names = ["agent1", "agent2"]
 # Create environment
 envs = gym.vector.AsyncVectorEnv(
     [
-        lambda: MultiAgentGymnasiumGenerals(
-            agents=agent_names, grid_factory=gf, truncation=1500
+        lambda: GymnasiumGenerals(
+            agent_ids=agent_names, grid_factory=gf, truncation=1500, pad_to=24
         )
         for _ in range(n_envs)
     ],

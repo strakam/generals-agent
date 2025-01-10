@@ -7,7 +7,7 @@ from network import Network
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-SEED = 42
+SEED = 43
 DATASET = "good_pov"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 # N_SAMPLES = 53_000_000  # Above 50
@@ -50,10 +50,8 @@ dataloader = torch.utils.data.DataLoader(
     collate_fn=collate_fn,
 )
 
-channel_sequence = [320, 384, 448, 448]
-model = Network(
-    lr=LEARNING_RATE, channel_sequence=channel_sequence, n_steps=MAX_STEPS, compile=True
-)
+# channel_sequence = [320, 384, 448, 448]
+model = Network(lr=LEARNING_RATE, n_steps=MAX_STEPS, compile=True)
 
 checkpoint_callback = ModelCheckpoint(
     dirpath=STORAGE,
