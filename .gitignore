@@ -14,6 +14,7 @@ supervised/highelo/
 checkpoints/
 checkpoints2/
 datasets/
+.neptune/
 
 *.tar
 

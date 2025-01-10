@@ -7,6 +7,18 @@ from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d as max_pool2d
 
 
+def optional_compile(func):
+    """Decorator that only applies torch.compile if the class is NeuroAgent"""
+
+    def wrapper(self, *args, **kwargs):
+        if self.__class__.__name__ in ["NeuroAgent", "OnlineAgent"]:
+            # Only compile for NeuroAgent
+            return torch.compile(func)(self, *args, **kwargs)
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class NeuroAgent(Agent):
     def __init__(
         self,
@@ -29,7 +41,7 @@ class NeuroAgent(Agent):
 
         self.reset()
 
-    @torch.compile
+    @optional_compile
     def reset(self):
         """
         Reset the agent's internal state.
@@ -53,7 +65,7 @@ class NeuroAgent(Agent):
             (self.batch_size, n_channels, 24, 24), device=device
         )
 
-    @torch.compile
+    @optional_compile
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         """
         Here the agent augments what it knows about the game with the new observation.
@@ -136,7 +148,7 @@ class NeuroAgent(Agent):
         self.last_observation = augmented_obs
         return augmented_obs
 
-    @torch.compile
+    @optional_compile
     def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
         """
         Based on a new observation, augment the internal state and return an action.

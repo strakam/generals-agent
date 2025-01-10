@@ -18,9 +18,12 @@ def main(args):
     network = torch.load(
         "checkpoints/sup114/epoch=0-step=52000.ckpt", map_location="cpu"
     )
+    # network = torch.load(
+    #     "checkpoints/sup119/epoch=0-step=40000.ckpt", map_location="cpu"
+    # )
     state_dict = network["state_dict"]
     # channel_sequence = [320, 384, 448, 448]
-    # model = Network(lr=1e-4, channel_sequence=channel_sequence, n_steps=9, compile=True)
+    # model = Network(lr=1e-4, channel_sequence=channel_sequence, compile=True)
     model = Network(lr=1e-4, n_steps=9, compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
