@@ -1,68 +1,47 @@
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button
+import torch
+from utils.tensor_vis import visualize_tensor
+from generals import Replay
+from generals.envs import PettingZooGenerals
+from generals.agents import ExpanderAgent
+from generals import GridFactory
+from supervised.neuro_agent import NeuroAgent
 
-# Function to visualize the tensor
-def visualize_tensor(tensor):
-    num_slices, height, width = tensor.shape
+# Initialize agents
+neuro1 = NeuroAgent(id="Agent1")
+neuro2 = NeuroAgent(id="Agent2", color=(0, 0, 255))
+expander = ExpanderAgent()
 
-    # Create a figure and axis
-    fig, ax = plt.subplots()
-    plt.subplots_adjust(bottom=0.2)  # Add space for widgets
+# Store agents in a dictionary
+agents = {
+    neuro1.id: neuro1,
+    neuro2.id: neuro2,
+}
 
-    # Display the first slice
-    img = ax.imshow(tensor[0], cmap="viridis")
-    ax.set_title("Slice 1")
+gf = GridFactory(
+    min_grid_dims=(4, 4),
+    max_grid_dims=(8, 8),
+)
+# Create environment
+env = PettingZooGenerals(agents=agents, render_mode=None, grid_factory=gf)
+replay = "verify"
+observations, info = env.reset(options={"replay_file": replay})
 
-    # Add text annotations for the values
-    annotations = []
-    for i in range(height):
-        row = []
-        for j in range(width):
-            text = ax.text(
-                j, i, f"{int(tensor[0, i, j])}", ha="center", va="center", color="white"
-            )
-            row.append(text)
-        annotations.append(row)
+done = False
+channel = 12
+images = []
+agent_to_visualize = "Agent1"
+while not done:
+    actions = {}
+    for agent in env.agents:
+        # Ask agent for action
+        _ = agents[agent].act(observations[agent])
+        actions[agent] = expander.act(observations[agent])
+        if agent == agent_to_visualize:
+            images.append(agents[agent].last_observation[channel])
+    # All agents perform their actions
+    observations, rewards, terminated, truncated, info = env.step(actions)
+    done = any(terminated.values()) or any(truncated.values())
 
-    # Slider for navigating slices
-    ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03], facecolor="lightgoldenrodyellow")
-    slider = Slider(ax_slider, "Slice", 0, num_slices, valinit=0, valstep=1)
-
-    # Update function for the slider
-    def update(val):
-        slice_idx = int(slider.val) - 1
-        img.set_data(tensor[slice_idx])
-        ax.set_title(f"Slice {slice_idx + 1}")
-
-        # Update text annotations
-        for i in range(height):
-            for j in range(width):
-                annotations[i][j].set_text(f"{int(tensor[slice_idx, i, j])}")
-
-        fig.canvas.draw_idle()
-
-    slider.on_changed(update)
-
-    # Function to handle keyboard events
-    def on_key(event):
-        current_val = slider.val
-        if event.key == "left":
-            new_val = max(current_val - 1, 1)
-        elif event.key == "right":
-            new_val = min(current_val + 1, num_slices)
-        else:
-            return
-        slider.set_val(new_val)  # Move the slider programmatically
-
-    fig.canvas.mpl_connect("key_press_event", on_key)
-
-    # Button for quitting the visualization
-    ax_button = plt.axes([0.8, 0.01, 0.1, 0.05])
-    button = Button(ax_button, "Quit", color="red", hovercolor="pink")
-
-    def quit(event):
-        plt.close(fig)
-
-    button.on_clicked(quit)
-
-    plt.show()
+# convert images to tensor
+images = torch.stack([torch.tensor(image) for image in images])
+visualize_tensor(images)

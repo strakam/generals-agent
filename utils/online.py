@@ -19,7 +19,7 @@ def load_model_checkpoint(checkpoint_path):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     state_dict = checkpoint["state_dict"]
 
-    model = Network()
+    model = Network(compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
