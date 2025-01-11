@@ -1,6 +1,6 @@
 from generals.envs import PettingZooGenerals
 from generals.core.action import compute_valid_move_mask
-from neuro_tensor import SupervisedAgent
+from supervised_agent import SupervisedAgent
 import json
 import torch
 import math
@@ -33,7 +33,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         army = obs[1][i][j]
         passing = d == 4
         valid_move = d < 4 and mask[i][j][d] == 1 and army > 1
-        is_high_elo = stars
+        is_high_elo = stars >= 70
         return is_high_elo and (passing or valid_move)
 
     def save_sample(self, obs, mask, value, action):

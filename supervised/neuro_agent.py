@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-from generals.core.game import Action
+from generals.core.action import Action, compute_valid_move_mask
 import lightning as L
-from generals.core.action import compute_valid_move_mask
-from scipy.ndimage import maximum_filter
-from generals.core.observation import Observation
 from generals.agents import Agent
+from generals.core.observation import Observation
+from torch.nn.functional import max_pool2d as max_pool2d
 
 
 class NeuroAgent(Agent):
@@ -13,121 +12,214 @@ class NeuroAgent(Agent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        color: tuple[int, int, int] = (242, 61, 106),
-        replay_moves: dict[int, list[int]] | None = None,
-        general_position: tuple[int, int] | None = None,
         history_size: int | None = 5,
+        batch_size: int | None = 1,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
-        super().__init__(id, color)
+        super().__init__(id)
         self.network = network
-
-        self.replay_moves = replay_moves
-        self.general_position = general_position
         self.history_size = history_size
+        self.batch_size = batch_size
+        self.device = device
+
+        if self.network is not None:
+            self.network.to(device)
 
         self.reset()
 
+    @torch.compile
     def reset(self):
-        self.army_stack = np.zeros((self.history_size, 24, 24))
-        self.enemy_stack = np.zeros((self.history_size, 24, 24))
-        self.last_army = np.zeros((24, 24))
-        self.last_enemy_army = np.zeros((24, 24))
-        self.cities = np.zeros((24, 24)).astype(bool)
-        self.generals = np.zeros((24, 24)).astype(bool)
-        self.mountains = np.zeros((24, 24)).astype(bool)
-        self.seen = np.zeros((24, 24)).astype(bool)
-        self.enemy_seen = np.zeros((24, 24)).astype(bool)
+        """
+        Reset the agent's internal state.
+        The state contains things that the agent remembers over time (positions of generals, etc.).
+        """
+        n_channels = 21 + 2 * self.history_size
+        shape = (self.batch_size, 24, 24)
+        history_shape = (self.batch_size, self.history_size, 24, 24)
 
-        self.last_observation = np.zeros((31, 24, 24))
+        device = self.device
+        self.army_stack = torch.zeros(history_shape, device=device)
+        self.enemy_stack = torch.zeros(history_shape, device=device)
+        self.last_army = torch.zeros(shape, device=device)
+        self.last_enemy_army = torch.zeros(shape, device=device)
+        self.cities = torch.zeros(shape, device=device).bool()
+        self.generals = torch.zeros(shape, device=device).bool()
+        self.mountains = torch.zeros(shape, device=device).bool()
+        self.seen = torch.zeros(shape, device=device).bool()
+        self.enemy_seen = torch.zeros(shape, device=device).bool()
+        self.last_observation = torch.zeros(
+            (self.batch_size, n_channels, 24, 24), device=device
+        )
 
+    @torch.compile
+    def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Here the agent augments what it knows about the game with the new observation.
+        This is then further used to make a decision.
+        """
+        armies = 0
+        generals = 1
+        cities = 2
+        mountains = 3
+        neutral_cells = 4
+        owned_cells = 5
+        opponent_cells = 6
+        fog_cells = 7
+        structures_in_fog = 8
+        owned_land_count = 9
+        owned_army_count = 10
+        opponent_land_count = 11
+        opponent_army_count = 12
+        timestep = 13
+        priority = 14
 
+        army_stack_clone = self.army_stack.clone().to(self.device)
+        enemy_stack_clone = self.enemy_stack.clone().to(self.device)
+        self.army_stack[:, 1:, :, :] = army_stack_clone[:, :-1, :, :]
+        self.army_stack[:, 0, :, :] = (
+            obs[:, armies, :, :] * obs[:, owned_cells, :, :] - self.last_army
+        )
 
-    def augment_observation(self, obs: Observation) -> np.ndarray:
-        _obs = {}
-        for k, channel in obs.items():
-            if type(channel) is np.ndarray:
-                pad_value = int(k == "mountains")
-                pad_h = (0, 24 - channel.shape[0])
-                pad_w = (0, 24 - channel.shape[1])
-                _obs[k] = np.pad(channel, (pad_h, pad_w), constant_values=pad_value)
-            else:
-                _obs[k] = np.full((24, 24), channel)
-        obs = _obs
+        self.enemy_stack[:, 1:, :, :] = enemy_stack_clone[:, :-1, :, :]
+        self.enemy_stack[:, 0, :, :] = (
+            obs[:, armies, :, :] * obs[:, opponent_cells, :, :] - self.last_enemy_army
+        )
 
-        self.army_stack[1:, :, :] = self.army_stack[:-1, :, :]
-        self.army_stack[0, :, :] = (obs["armies"] * obs["owned_cells"]) - self.last_army
+        self.last_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
+        self.last_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
-        self.enemy_stack[1:, :, :] = self.enemy_stack[:-1, :, :]
-        self.enemy_stack[0, :, :] = (
-            obs["armies"] * obs["opponent_cells"]
-        ) - self.last_enemy_army
-
-        self.last_army = obs["armies"] * obs["owned_cells"]
-        self.last_enemy_army = obs["armies"] * obs["opponent_cells"]
-
-        self.seen = np.logical_or(
+        self.seen = torch.logical_or(
             self.seen,
-            maximum_filter(obs["owned_cells"], size=3).astype(bool),
+            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
         )
 
-        self.enemy_seen = np.logical_or(
+        self.enemy_seen = torch.logical_or(
             self.enemy_seen,
-            maximum_filter(obs["opponent_cells"], size=3).astype(bool),
+            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
         )
 
-        self.cities |= obs["cities"]
-        self.generals |= obs["generals"]
-        self.mountains |= obs["mountains"]
+        self.cities |= obs[:, cities, :, :].bool()
+        self.generals |= obs[:, generals, :, :].bool()
+        self.mountains |= obs[:, mountains, :, :].bool()
 
-        return np.stack(
+        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        channels = torch.stack(
             [
-                obs["armies"],
-                obs["armies"] * obs["owned_cells"],
-                obs["armies"] * obs["opponent_cells"],
-                obs["armies"] * obs["neutral_cells"],
+                obs[:, armies, :, :],
+                obs[:, armies, :, :] * obs[:, owned_cells, :, :],
+                obs[:, armies, :, :] * obs[:, opponent_cells, :, :],
+                obs[:, armies, :, :] * obs[:, neutral_cells, :, :],
                 self.seen,
                 self.enemy_seen,  # enemy sight
                 self.generals,
                 self.cities,
                 self.mountains,
-                obs["neutral_cells"],
-                obs["owned_cells"],
-                obs["opponent_cells"],
-                obs["fog_cells"],
-                obs["structures_in_fog"],
-                obs["timestep"] * np.ones((24, 24)),
-                (obs["timestep"] % 50) * np.ones((24, 24)) / 50,
-                obs["priority"] * np.ones((24, 24)),
-                obs["owned_land_count"] * np.ones((24, 24)),
-                obs["owned_army_count"] * np.ones((24, 24)),
-                obs["opponent_land_count"] * np.ones((24, 24)),
-                obs["opponent_army_count"] * np.ones((24, 24)),
-                *self.army_stack,
-                *self.enemy_stack,
-            ]
+                obs[:, neutral_cells, :, :],
+                obs[:, owned_cells, :, :],
+                obs[:, opponent_cells, :, :],
+                obs[:, fog_cells, :, :],
+                obs[:, structures_in_fog, :, :],
+                obs[:, timestep, :, :] * ones,
+                (obs[:, timestep, :, :] % 50) * ones / 50,
+                obs[:, priority, :, :] * ones,
+                obs[:, owned_land_count, :, :] * ones,
+                obs[:, owned_army_count, :, :] * ones,
+                obs[:, opponent_land_count, :, :] * ones,
+                obs[:, opponent_army_count, :, :] * ones,
+            ],
+            dim=1,
         )
+        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
+        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
+        self.last_observation = augmented_obs
+        return augmented_obs
 
-    def act(self, observation: Observation) -> Action:
+    @torch.compile
+    def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
         """
-        Randomly selects a valid action.
+        Based on a new observation, augment the internal state and return an action.
         """
-        self.last_observation = self.augment_observation(observation)
-        return [1, 0, 0, 0, 0]
-        # mask = compute_valid_move_mask(observation)
-        # mask = np.expand_dims(mask, axis=0)
-        # obs = np.expand_dims(self.last_observation, axis=0)
-        #
-        # mask = torch.from_numpy(mask).float()
-        # obs = torch.from_numpy(obs).float()
-        #
-        # with torch.no_grad():
-        #     s, d = self.network(obs, mask)
-        # s = s[0].detach().numpy()
-        # d = d[0].detach().numpy()
-        #
-        # s = np.argmax(s)
-        # i, j = divmod(s, 24)
-        # d = np.argmax(d)
-        # if d == 4:
-        #     return [1, 0, 0, 0, 0]
-        # return [0, i, j, d, 0]
+        if isinstance(obs, np.ndarray):
+            obs = torch.from_numpy(obs).float().to(self.device)
+        self.augment_observation(obs)
+        mask = torch.from_numpy(mask).float().to(self.device)
+
+        with torch.no_grad():
+            square, direction = self.network(self.last_observation, mask)
+
+        square = torch.argmax(square, dim=1)
+        direction = torch.argmax(direction, dim=1)
+        row = square // 24
+        col = square % 24
+        zeros = torch.zeros(self.batch_size).to(self.device)
+        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        # actions, where direction is 4, set the first value to 1
+        actions[actions[:, 3] == 4, 0] = 1
+        return actions.cpu().numpy().astype(int)
+
+
+class OnlineAgent(NeuroAgent):
+    def __init__(
+        self,
+        network: L.LightningModule | None = None,
+        id: str = "Neuro",
+        history_size: int | None = 5,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
+    ):
+        super().__init__(network, id, history_size, 1, device)
+        self.network.eval()
+
+    def act(self, obs: Observation) -> Action:
+        """
+        Based on a new observation, augment the internal state and return an action.
+        """
+        mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        action = super().act(obs, mask)[0]  # Take the only action
+        if action[3] == 4:
+            return [1, 0, 0, 0, 0]
+        return action
+
+    def precompile(self):
+        # Run the agent once to precompile the code
+        self.reset()
+        self.augment_observation(torch.zeros((1, 15, 24, 24)))
+        obs = Observation(
+            armies=np.zeros((24, 24)),
+            generals=np.zeros((24, 24)),
+            cities=np.zeros((24, 24)),
+            mountains=np.zeros((24, 24)),
+            neutral_cells=np.zeros((24, 24)),
+            owned_cells=np.zeros((24, 24)),
+            opponent_cells=np.zeros((24, 24)),
+            fog_cells=np.zeros((24, 24)),
+            structures_in_fog=np.zeros((24, 24)),
+            owned_land_count=0,
+            owned_army_count=0,
+            opponent_land_count=0,
+            opponent_army_count=0,
+            timestep=0,
+            priority=0,
+        )
+        self.act(obs)
+        print("Precompiled the agent")
+
+
+class SupervisedAgent(NeuroAgent):
+    def __init__(
+        self,
+        network: L.LightningModule | None = None,
+        id: str = "Neuro",
+        history_size: int | None = 5,
+        device: torch.device = "cpu",
+    ):
+        super().__init__(network, id, history_size, 1, device)
+
+    def act(self, obs: Observation) -> Action:
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        self.augment_observation(obs)
+        return [1, 0, 0, 0, 0]  # pass

@@ -1,22 +1,10 @@
 import torch
 import numpy as np
-from generals.core.action import Action, compute_valid_move_mask
+from generals.core.action import Action
 import lightning as L
 from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d as max_pool2d
-
-
-def optional_compile(func):
-    """Decorator that only applies torch.compile if the class is NeuroAgent"""
-
-    def wrapper(self, *args, **kwargs):
-        if self.__class__.__name__ in ["NeuroAgent", "OnlineAgent"]:
-            # Only compile for NeuroAgent
-            return torch.compile(func)(self, *args, **kwargs)
-        return func(self, *args, **kwargs)
-
-    return wrapper
 
 
 class NeuroAgent(Agent):
@@ -41,7 +29,6 @@ class NeuroAgent(Agent):
 
         self.reset()
 
-    @optional_compile
     def reset(self):
         """
         Reset the agent's internal state.
@@ -65,7 +52,6 @@ class NeuroAgent(Agent):
             (self.batch_size, n_channels, 24, 24), device=device
         )
 
-    @optional_compile
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         """
         Here the agent augments what it knows about the game with the new observation.
@@ -148,7 +134,6 @@ class NeuroAgent(Agent):
         self.last_observation = augmented_obs
         return augmented_obs
 
-    @optional_compile
     def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
         """
         Based on a new observation, augment the internal state and return an action.
@@ -170,55 +155,6 @@ class NeuroAgent(Agent):
         # actions, where direction is 4, set the first value to 1
         actions[actions[:, 3] == 4, 0] = 1
         return actions.cpu().numpy().astype(int)
-
-
-class OnlineAgent(NeuroAgent):
-    def __init__(
-        self,
-        network: L.LightningModule | None = None,
-        id: str = "Neuro",
-        history_size: int | None = 5,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
-    ):
-        super().__init__(network, id, history_size, 1, device)
-        self.network.eval()
-
-    def act(self, obs: Observation) -> Action:
-        """
-        Based on a new observation, augment the internal state and return an action.
-        """
-        mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
-        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
-        action = super().act(obs, mask)[0]  # Take the only action
-        if action[3] == 4:
-            return [1, 0, 0, 0, 0]
-        return action
-
-    def precompile(self):
-        # Run the agent once to precompile the code
-        self.reset()
-        self.augment_observation(torch.zeros((1, 15, 24, 24)))
-        obs = Observation(
-            armies=np.zeros((24, 24)),
-            generals=np.zeros((24, 24)),
-            cities=np.zeros((24, 24)),
-            mountains=np.zeros((24, 24)),
-            neutral_cells=np.zeros((24, 24)),
-            owned_cells=np.zeros((24, 24)),
-            opponent_cells=np.zeros((24, 24)),
-            fog_cells=np.zeros((24, 24)),
-            structures_in_fog=np.zeros((24, 24)),
-            owned_land_count=0,
-            owned_army_count=0,
-            opponent_land_count=0,
-            opponent_army_count=0,
-            timestep=0,
-            priority=0,
-        )
-        self.act(obs)
-        print("Precompiled the agent")
 
 
 class SupervisedAgent(NeuroAgent):
