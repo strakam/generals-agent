@@ -1,72 +1,134 @@
+from dataclasses import dataclass
+from pathlib import Path
 import os
 import torch
 import lightning as L
+from lightning.pytorch.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers.neptune import NeptuneLogger
+
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
 from network import Network
 
-from pytorch_lightning.loggers.neptune import NeptuneLogger
-from lightning.pytorch.callbacks import ModelCheckpoint
 
-SEED = 43
-DATASET = "good_pov"
-# N_SAMPLES = 2 * 60995855 # For all new replays
-# N_SAMPLES = 53_000_000  # Above 50
-N_SAMPLE = 9_000_000  # Above 70
-N_SAMPLES = 16_000_000  # For high elo povs
+@dataclass
+class TrainingConfig:
+    """Training configuration parameters."""
 
-BUFFER_SIZE = 18000
-LEARNING_RATE = 2e-4
-BATCH_SIZE = 1792
-N_WORKERS =  42
-LOG_EVERY_N_STEPS = 20
-EVAL_N_GAMES = 5
-N_EPOCHS = 4
-CLIP_VAL = 2.0
-MAX_STEPS = N_SAMPLES // BATCH_SIZE * N_EPOCHS
-STORAGE = "/storage/praha1/home/strakam3/checkpoints"
+    # Data parameters
+    dataset_name: str = "good_pov"
+    n_samples: int = 16_000_000
+    buffer_size: int = 300
+    batch_size: int = 32  # 1792
+    n_workers: int = 4
 
-torch.manual_seed(SEED)
-torch.set_float32_matmul_precision("high")
+    # Training parameters
+    learning_rate: float = 2e-4
+    n_epochs: int = 4
+    clip_val: float = 2.0
+    seed: int = 43
 
-key_file = open("neptune_token.txt", "r")
-key = key_file.read()
-neptune_logger = NeptuneLogger(
-    api_key=key,
-    project="strakam/supervised-agent",
-)
+    # Logging and checkpointing
+    log_every_n_steps: int = 20
+    checkpoint_every_n_steps: int = 4000
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/checkpoints"
+    neptune_token_path: str = "neptune_token.txt"
+
+    def __post_init__(self):
+        """Calculate dependent parameters after initialization."""
+        self.max_steps = self.n_samples // self.batch_size * self.n_epochs
 
 
-path = f"datasets/{DATASET}"
-replays = [f"{path}/{name}" for name in os.listdir(path)]
-torch.randperm(len(replays))
+class DataModule:
+    """Handles dataset and dataloader setup."""
+
+    def __init__(self, config: TrainingConfig):
+        self.config = config
+
+    def setup_dataset(self) -> torch.utils.data.DataLoader:
+        """Create and configure the dataset and dataloader."""
+        dataset_path = Path("datasets") / self.config.dataset_name
+        replays = [str(dataset_path / name) for name in os.listdir(dataset_path)]
+
+        # Shuffle replays
+        torch.randperm(len(replays))
+
+        # Create dataset
+        dataset = ReplayDataset(replays, buffer_size=self.config.buffer_size)
+
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.config.batch_size,
+            num_workers=self.config.n_workers,
+            worker_init_fn=per_worker_init_fn,
+            collate_fn=collate_fn,
+        )
 
 
-dataset = ReplayDataset(replays, buffer_size=BUFFER_SIZE)
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=BATCH_SIZE,
-    num_workers=N_WORKERS,
-    worker_init_fn=per_worker_init_fn,
-    collate_fn=collate_fn,
-)
+class TrainingModule:
+    """Handles training setup and execution."""
 
-# channel_sequence = [320, 384, 448, 448]
-model = Network(lr=LEARNING_RATE, n_steps=MAX_STEPS, compile=True)
+    def __init__(self, config: TrainingConfig):
+        self.config = config
+        self._setup_environment()
 
-checkpoint_callback = ModelCheckpoint(
-    dirpath=STORAGE,
-    save_top_k=-1,
-    every_n_train_steps=4000,
-)
+    def _setup_environment(self):
+        """Configure PyTorch and training environment."""
+        torch.manual_seed(self.config.seed)
+        torch.set_float32_matmul_precision("high")
 
-trainer = L.Trainer(
-    logger=neptune_logger,
-    log_every_n_steps=LOG_EVERY_N_STEPS,
-    max_steps=MAX_STEPS,
-    max_epochs=-1,
-    gradient_clip_val=CLIP_VAL,
-    gradient_clip_algorithm="norm",
-    callbacks=[checkpoint_callback],
-)
+    def _create_logger(self) -> NeptuneLogger:
+        """Initialize Neptune logger."""
+        with open(self.config.neptune_token_path, "r") as f:
+            neptune_key = f.read().strip()
 
-trainer.fit(model, train_dataloaders=dataloader)
+        return NeptuneLogger(
+            api_key=neptune_key,
+            project="strakam/supervised-agent",
+        )
+
+    def _create_checkpoint_callback(self) -> ModelCheckpoint:
+        """Configure checkpoint callback."""
+        return ModelCheckpoint(
+            dirpath=self.config.checkpoint_dir,
+            save_top_k=-1,
+            every_n_train_steps=self.config.checkpoint_every_n_steps,
+        )
+
+    def create_trainer(self) -> L.Trainer:
+        """Create and configure the Lightning trainer."""
+        return L.Trainer(
+            # logger=self._create_logger(),
+            log_every_n_steps=self.config.log_every_n_steps,
+            max_steps=self.config.max_steps,
+            max_epochs=-1,
+            gradient_clip_val=self.config.clip_val,
+            gradient_clip_algorithm="norm",
+            callbacks=[self._create_checkpoint_callback()],
+        )
+
+    def create_model(self) -> Network:
+        """Create and configure the model."""
+        return Network(
+            lr=self.config.learning_rate, n_steps=self.config.max_steps, compile=True
+        )
+
+
+def main():
+    # Initialize configuration
+    config = TrainingConfig()
+
+    # Setup data
+    data_module = DataModule(config)
+    dataloader = data_module.setup_dataset()
+
+    # Setup training
+    training_module = TrainingModule(config)
+    model = training_module.create_model()
+    trainer = training_module.create_trainer()
+
+    # Start training
+    trainer.fit(model, train_dataloaders=dataloader)
+
+
+if __name__ == "__main__":
+    main()
