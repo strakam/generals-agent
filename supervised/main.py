@@ -12,7 +12,7 @@ DATASET = "good_pov"
 # N_SAMPLES = 2 * 60995855 # For all new replays
 # N_SAMPLES = 53_000_000  # Above 50
 N_SAMPLE = 9_000_000  # Above 70
-N_SAMPLES = 25_000_000  # For high elo povs
+N_SAMPLES = 16_000_000  # For high elo povs
 
 BUFFER_SIZE = 18000
 LEARNING_RATE = 2e-4

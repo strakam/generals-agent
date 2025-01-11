@@ -68,6 +68,22 @@ class Network(L.LightningModule):
         obs[:, 21:, :, :] = obs[:, 21:, :, :] / single_tile_army_normalize
         return obs
 
+    # @torch.compile
+    # def normalize_observations(self, obs):
+    #     timestep_normalize = 500
+    #     army_normalize = 500
+    #     land_normalize = 200
+    #
+    #     obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
+    #     obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
+    #
+    #     obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
+    #     obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
+    #     obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
+    #     obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
+    #     obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
+    #     return obs
+
     @torch.compile
     def prepare_masks(self, obs, direction_mask):
         square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
