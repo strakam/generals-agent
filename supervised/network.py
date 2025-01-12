@@ -14,7 +14,7 @@ class Network(L.LightningModule):
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = 31, 24, 24
+        c, h, w = 34, 24, 24
         self.lr = lr
         self.n_steps = n_steps
 
@@ -51,37 +51,21 @@ class Network(L.LightningModule):
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
-    # @torch.compile
-    # def normalize_observations(self, obs):
-    #     single_tile_army_normalize = 120
-    #     timestep_normalize = 200
-    #     army_normalize = 400
-    #     land_normalize = 100
-    #
-    #     obs[:, :4, :, :] = obs[:, :4, :, :] / single_tile_army_normalize
-    #     obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
-    #
-    #     obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
-    #     obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
-    #     obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-    #     obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-    #     obs[:, 21:, :, :] = obs[:, 21:, :, :] / single_tile_army_normalize
-    #     return obs
-
     @torch.compile
     def normalize_observations(self, obs):
-        timestep_normalize = 500
-        army_normalize = 500
-        land_normalize = 200
+        single_tile_army_normalize = 120
+        timestep_normalize = 200
+        army_normalize = 400
+        land_normalize = 100
 
-        obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
+        obs[:, :4, :, :] = obs[:, :4, :, :] / single_tile_army_normalize
         obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
 
         obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
         obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
         obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-        obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
+        obs[:, 24:, :, :] = obs[:, 24:, :, :] / single_tile_army_normalize
         return obs
 
     @torch.compile
@@ -98,7 +82,7 @@ class Network(L.LightningModule):
         return square_mask, direction_mask
 
     def forward(self, obs, mask, teacher_cells=None):
-        obs = self.normalize_observations(obs)
+        # obs = self.normalize_observations(obs)
         x = self.backbone(obs)
         # value = self.value_head(x)
 

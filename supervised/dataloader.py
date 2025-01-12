@@ -1,6 +1,6 @@
 from generals.envs import PettingZooGenerals
 from generals.core.action import compute_valid_move_mask
-from supervised_agent import SupervisedAgent
+from agent import SupervisedAgent
 import json
 import torch
 import math
@@ -12,10 +12,11 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.replay_files = replay_files
         self.replays = None
         self.env = None
+        self.A, self.B = SupervisedAgent(id="red"), SupervisedAgent(id="blue")
 
         self.buffer = [
             [
-                np.empty((31, 24, 24), dtype=np.float32),  # Obs
+                np.empty((self.A.n_channels, 24, 24), dtype=np.float32),  # Obs
                 np.empty((24, 24, 4), dtype=np.float32),  # Mask
                 0.0,  # Value
                 np.empty(5, dtype=np.int32),  # Action
@@ -25,7 +26,6 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.current_replay = None
         self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
-        self.A, self.B = SupervisedAgent(id="red"), SupervisedAgent(id="blue")
 
     def check_validity(self, obs, mask, action, stars):
         # Check if the action is valid, return False if not
@@ -193,7 +193,7 @@ def per_worker_init_fn(worker_id):
     print(f"Worker {worker_id} handling replays {start} to {end}")
     print(f"Worker {worker_id} {dataset.replays[:3]}")
 
-    dataset.env = PettingZooGenerals(agent_ids=["red", "blue"])
+    dataset.env = PettingZooGenerals(agents=["red", "blue"])
 
 
 def collate_fn(batch):

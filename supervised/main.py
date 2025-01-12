@@ -17,9 +17,9 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "good_pov"
     n_samples: int = 16_000_000
-    buffer_size: int = 300
-    batch_size: int = 32  # 1792
-    n_workers: int = 4
+    buffer_size: int = 1800
+    batch_size: int = 1792
+    n_workers: int = 32
 
     # Training parameters
     learning_rate: float = 2e-4
@@ -97,7 +97,7 @@ class TrainingModule:
     def create_trainer(self) -> L.Trainer:
         """Create and configure the Lightning trainer."""
         return L.Trainer(
-            # logger=self._create_logger(),
+            logger=self._create_logger(),
             log_every_n_steps=self.config.log_every_n_steps,
             max_steps=self.config.max_steps,
             max_epochs=-1,
