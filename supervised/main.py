@@ -15,9 +15,9 @@ class TrainingConfig:
     """Training configuration parameters."""
 
     # Data parameters
-    dataset_name: str = "good_pov"
+    dataset_name: str = "above70"
     n_samples: int = 16_000_000
-    buffer_size: int = 1800
+    buffer_size: int = 18000
     batch_size: int = 1792
     n_workers: int = 32
 
