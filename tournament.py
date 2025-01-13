@@ -9,11 +9,12 @@ from itertools import combinations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 from torch import nn
+import neptune
 
 from generals import GridFactory
 from generals.envs import GymnasiumGenerals
 from supervised.network import Network
-from supervised.neuro_agent import NeuroAgent
+from supervised.agent import NeuroAgent
 
 
 @dataclass
@@ -21,15 +22,16 @@ class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
     n_envs: int = 5
-    num_games: int = 5
-    checkpoint_dir: str = "checkpoints/sup145"
-    min_grid_size: int = 10
-    max_grid_size: int = 15
+    num_games: int = 25
+    checkpoint_dir: str = "checkpoints/sup169"
+    min_grid_size: int = 15
+    max_grid_size: int = 24
     mountain_density: float = 0.08
     city_density: float = 0.05
     truncation_steps: int = 1500
     grid_padding: int = 24
     channel_sequence: List[int] = (256, 320, 384, 384)
+    neptune_project: str = "strakam/supervised-agent"
 
 
 class EnvironmentFactory:
@@ -49,10 +51,9 @@ class EnvironmentFactory:
     def create_environment(self, agent_names: List[str]) -> GymnasiumGenerals:
         grid_factory = self.create_grid_factory()
         return GymnasiumGenerals(
-            agent_ids=agent_names,
+            agents=agent_names,
             grid_factory=grid_factory,
             truncation=self.config.truncation_steps,
-            pad_to=self.config.grid_padding,
         )
 
 
@@ -81,12 +82,61 @@ class AgentLoader:
         return model
 
 
+class NeptuneLogger:
+    """Handles logging experiment metrics to Neptune."""
+
+    def __init__(self, config: ExperimentConfig):
+        self.run = neptune.init_run(
+            project=config.neptune_project,
+            name="generals-tournament",
+            tags=["tournament", "evaluation"],
+        )
+        self.config = config
+        self._log_config()
+
+    def _log_config(self):
+        """Log experiment configuration parameters."""
+        self.run["parameters"] = {
+            "n_envs": self.config.n_envs,
+            "num_games": self.config.num_games,
+            "grid_size": f"{self.config.min_grid_size}-{self.config.max_grid_size}",
+            "mountain_density": self.config.mountain_density,
+            "city_density": self.config.city_density,
+            "truncation_steps": self.config.truncation_steps,
+        }
+
+    def log_game_result(self, agent1_id: str, agent2_id: str, winner_id: str):
+        """Log individual game results."""
+        matchup = f"{agent1_id}_vs_{agent2_id}"
+        self.run[f"games/{matchup}/results"].append({"winner": winner_id})
+
+    def log_matchup_results(self, agent1_id: str, agent2_id: str, wins: Dict[str, int]):
+        """Log final results of a matchup between two agents."""
+        matchup = f"{agent1_id}_vs_{agent2_id}"
+        total_games = self.config.num_games
+        self.run[f"matchups/{matchup}"] = {
+            "agent1_wins": wins[agent1_id],
+            "agent2_wins": wins[agent2_id],
+            "agent1_winrate": wins[agent1_id] / total_games,
+            "agent2_winrate": wins[agent2_id] / total_games,
+        }
+
+    def log_heatmap(self, heatmap_path: str):
+        """Log the winrate heatmap visualization."""
+        self.run["visualizations/winrate_heatmap"].upload(heatmap_path)
+
+    def close(self):
+        """Close the Neptune run."""
+        self.run.stop()
+
+
 class AgentEvaluator:
     """Handles agent matchups and evaluations."""
 
-    def __init__(self, config: ExperimentConfig):
+    def __init__(self, config: ExperimentConfig, logger: NeptuneLogger):
         self.config = config
         self.env_factory = EnvironmentFactory(config)
+        self.logger = logger
 
     def run_matchup(self, agent1: NeuroAgent, agent2: NeuroAgent) -> Dict[str, int]:
         names = [agent1.id, agent2.id]
@@ -110,8 +160,11 @@ class AgentEvaluator:
             )
 
             if any(terminated):
-                ended_games += self._process_game_results(infos, wins)
+                ended_games += self._process_game_results(
+                    infos, wins, agent1.id, agent2.id
+                )
 
+        self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
 
     def _play_step(
@@ -131,13 +184,17 @@ class AgentEvaluator:
         observations, _, terminated, truncated, infos = envs.step(actions)
         return observations, terminated, truncated, infos
 
-    def _process_game_results(self, infos: Dict, wins: Dict[str, int]) -> int:
+    def _process_game_results(
+        self, infos: Dict, wins: Dict[str, int], agent1_id: str, agent2_id: str
+    ) -> int:
         ended = 0
         for agent_id in wins.keys():
             for game in infos[agent_id]:
                 if game[3] == 1:  # Victory condition
+                    print(f"{agent_id} won!")
                     wins[agent_id] += 1
                     ended += 1
+                    self.logger.log_game_result(agent1_id, agent2_id, agent_id)
         return ended
 
 
@@ -148,7 +205,7 @@ class ResultVisualizer:
         self,
         winrates: List[List[float]],
         agent_names: List[str],
-        output_path: str = "/storage/praha1/home/strakam3/winrates.png",
+        output_path: str = "tournament_heatmap.png",
     ):
         plt.figure(figsize=(8, 6))
         mask = np.eye(len(agent_names), dtype=bool)
@@ -164,7 +221,7 @@ class ResultVisualizer:
 
         self._configure_plot(agent_names)
         plt.savefig(output_path)
-        # plt.show()
+        return output_path
 
     def _configure_plot(self, agent_names: List[str]):
         plt.xticks(
@@ -182,27 +239,33 @@ class ResultVisualizer:
 
 def main():
     config = ExperimentConfig()
+    neptune_logger = NeptuneLogger(config)
     agent_loader = AgentLoader(config)
-    evaluator = AgentEvaluator(config)
+    evaluator = AgentEvaluator(config, neptune_logger)
     visualizer = ResultVisualizer()
 
-    # Load agents
-    checkpoint_files = sorted(os.listdir(config.checkpoint_dir))[::3]
-    agents = [
-        agent_loader.load_agent(f"{config.checkpoint_dir}/{cp}")
-        for cp in checkpoint_files
-    ]
+    try:
+        # Load agents
+        checkpoint_files = sorted(os.listdir(config.checkpoint_dir))
+        agents = [
+            agent_loader.load_agent(f"{config.checkpoint_dir}/{cp}")
+            for cp in checkpoint_files
+        ]
 
-    # Run tournament
-    winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
-    for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
-        wins = evaluator.run_matchup(agent1, agent2)
-        print(f"{agent1.id} vs {agent2.id}: {wins}")
-        winrates[i][j] = wins[agent1.id] / config.num_games
-        winrates[j][i] = wins[agent2.id] / config.num_games
+        # Run tournament
+        winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
+        for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
+            wins = evaluator.run_matchup(agent1, agent2)
+            print(f"{agent1.id} vs {agent2.id}: {wins}")
+            winrates[i][j] = wins[agent1.id] / config.num_games
+            winrates[j][i] = wins[agent2.id] / config.num_games
 
-    # Visualize results
-    visualizer.create_heatmap(winrates, checkpoint_files)
+        # Visualize results
+        heatmap_path = visualizer.create_heatmap(winrates, checkpoint_files)
+        neptune_logger.log_heatmap(heatmap_path)
+
+    finally:
+        neptune_logger.close()
 
 
 if __name__ == "__main__":
