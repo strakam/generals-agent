@@ -16,16 +16,16 @@ class TrainingConfig:
 
     # Data parameters
     dataset_name: str = "above70"
-    n_samples: int = 42_000_000
+    n_samples: int = 11_370_000
     buffer_size: int = 18000
     batch_size: int = 1792
     n_workers: int = 32
 
     # Training parameters
     learning_rate: float = 2e-4
-    n_epochs: int = 2
+    n_epochs: int = 8
     clip_val: float = 2.0
-    seed: int = 43
+    seed: int = 42
 
     # Logging and checkpointing
     log_every_n_steps: int = 20
