@@ -21,15 +21,14 @@ from supervised.agent import NeuroAgent
 class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
-    n_envs: int = 5
-    num_games: int = 25
+    n_envs: int = 128
+    num_games: int = 250
     checkpoint_dir: str = "checkpoints/sup169"
     min_grid_size: int = 15
     max_grid_size: int = 24
     mountain_density: float = 0.08
     city_density: float = 0.05
     truncation_steps: int = 1500
-    grid_padding: int = 24
     channel_sequence: List[int] = (256, 320, 384, 384)
     neptune_project: str = "strakam/supervised-agent"
 
@@ -205,7 +204,7 @@ class ResultVisualizer:
         self,
         winrates: List[List[float]],
         agent_names: List[str],
-        output_path: str = "tournament_heatmap.png",
+        output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
     ):
         plt.figure(figsize=(8, 6))
         mask = np.eye(len(agent_names), dtype=bool)
