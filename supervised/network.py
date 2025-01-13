@@ -159,6 +159,9 @@ class Network(L.LightningModule):
             # Log the gradient norm for this module
             self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
 
+        # also store learning rate
+        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
+
 
 class Pyramid(nn.Module):
     def __init__(

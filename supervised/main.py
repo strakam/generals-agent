@@ -16,14 +16,14 @@ class TrainingConfig:
 
     # Data parameters
     dataset_name: str = "above70"
-    n_samples: int = 9_000_000
+    n_samples: int = 42_000_000
     buffer_size: int = 18000
     batch_size: int = 1792
     n_workers: int = 32
 
     # Training parameters
     learning_rate: float = 2e-4
-    n_epochs: int = 4
+    n_epochs: int = 2
     clip_val: float = 2.0
     seed: int = 43
 
@@ -32,7 +32,7 @@ class TrainingConfig:
     checkpoint_every_n_steps: int = 4000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/checkpoints"
     neptune_token_path: str = "neptune_token.txt"
-    model_checkpoint: str = "epoch=0-step=32000.ckpt"
+    model_ckpt: str = "epoch=0-step=32000.ckpt"
 
     def __post_init__(self):
         """Calculate dependent parameters after initialization."""
@@ -110,12 +110,7 @@ class TrainingModule:
 
     def create_model(self) -> Network:
         """Create and configure the model."""
-        if self.config.model_checkpoint:
-            model = Network.load_from_checkpoint(
-                self.config.model_checkpoint, compile=True
-            )
-        else:
-            model = Network(lr=self.config.learning_rate, compile=True)
+        model = Network(lr=self.config.learning_rate, compile=True)
         return model
 
 
@@ -133,7 +128,10 @@ def main():
     trainer = training_module.create_trainer()
 
     # Start training
-    trainer.fit(model, train_dataloaders=dataloader)
+    if config.model_checkpoint:
+        trainer.fit(model, train_dataloaders=dataloader, ckpt_path=config.model_ckpt)
+    else:
+        trainer.fit(model, train_dataloaders=dataloader)
 
 
 if __name__ == "__main__":
