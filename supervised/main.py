@@ -16,7 +16,7 @@ class TrainingConfig:
 
     # Data parameters
     dataset_name: str = "above70"
-    n_samples: int = 16_000_000
+    n_samples: int = 9_000_000
     buffer_size: int = 18000
     batch_size: int = 1792
     n_workers: int = 32
@@ -90,6 +90,7 @@ class TrainingModule:
         """Configure checkpoint callback."""
         return ModelCheckpoint(
             dirpath=self.config.checkpoint_dir,
+            filename="{step}",
             save_top_k=-1,
             every_n_train_steps=self.config.checkpoint_every_n_steps,
         )

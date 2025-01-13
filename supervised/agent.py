@@ -241,6 +241,7 @@ class OnlineAgent(NeuroAgent):
         """
         Based on a new observation, augment the internal state and return an action.
         """
+        obs.pad_observation(24)
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action = super().act(obs, mask)[0]  # Take the only action
