@@ -32,6 +32,7 @@ class TrainingConfig:
     checkpoint_every_n_steps: int = 4000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/checkpoints"
     neptune_token_path: str = "neptune_token.txt"
+    model_checkpoint: str = "epoch=0-step=32000.ckpt"
 
     def __post_init__(self):
         """Calculate dependent parameters after initialization."""
@@ -109,9 +110,13 @@ class TrainingModule:
 
     def create_model(self) -> Network:
         """Create and configure the model."""
-        return Network(
-            lr=self.config.learning_rate, n_steps=self.config.max_steps, compile=True
-        )
+        if self.config.model_checkpoint:
+            model = Network.load_from_checkpoint(
+                self.config.model_checkpoint, compile=True
+            )
+        else:
+            model = Network(lr=self.config.learning_rate, compile=True)
+        return model
 
 
 def main():

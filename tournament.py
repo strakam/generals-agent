@@ -148,6 +148,7 @@ class AgentEvaluator:
         ended_games = 0
 
         while ended_games < self.config.num_games:
+            # for each agent, get the action
             actions = []
             for i, agent in enumerate([agent1, agent2]):
                 masks = np.stack([info[-1] for info in infos[agent.id]])
@@ -155,6 +156,7 @@ class AgentEvaluator:
 
             actions = np.stack(actions, axis=1)
 
+            # game step
             observations, _, terminated, _, infos = envs.step(actions)
             if any(terminated):
                 ended_games += self._process_game_results(
@@ -239,7 +241,6 @@ def main():
         winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
         for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
             wins = evaluator.run_matchup(agent1, agent2)
-            print(f"{agent1.id} vs {agent2.id}: {wins}")
             winrates[i][j] = wins[agent1.id] / config.num_games
             winrates[j][i] = wins[agent2.id] / config.num_games
 
