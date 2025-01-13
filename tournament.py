@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import combinations
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict
 from torch import nn
 import neptune
 
@@ -139,25 +139,23 @@ class AgentEvaluator:
 
     def run_matchup(self, agent1: NeuroAgent, agent2: NeuroAgent) -> Dict[str, int]:
         names = [agent1.id, agent2.id]
-        env_creator = lambda: self.env_factory.create_environment(names)
         envs = gym.vector.AsyncVectorEnv(
-            [env_creator for _ in range(self.config.n_envs)]
+            [lambda: self._env_creator(names) for _ in range(self.config.n_envs)]
         )
 
-        return self._play_games(envs, agent1, agent2)
-
-    def _play_games(
-        self, envs, agent1: NeuroAgent, agent2: NeuroAgent
-    ) -> Dict[str, int]:
         observations, infos = envs.reset()
         wins = {agent1.id: 0, agent2.id: 0}
         ended_games = 0
 
         while ended_games < self.config.num_games:
-            observations, terminated, truncated, infos = self._play_step(
-                envs, observations, infos, agent1, agent2
-            )
+            actions = []
+            for i, agent in enumerate([agent1, agent2]):
+                masks = np.stack([info[-1] for info in infos[agent.id]])
+                actions.append(agent.act(observations[:, i, ...], masks))
 
+            actions = np.stack(actions, axis=1)
+
+            observations, _, terminated, _, infos = envs.step(actions)
             if any(terminated):
                 ended_games += self._process_game_results(
                     infos, wins, agent1.id, agent2.id
@@ -166,22 +164,8 @@ class AgentEvaluator:
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
 
-    def _play_step(
-        self, envs, observations, infos, agent1, agent2
-    ) -> Tuple[np.ndarray, bool, bool, Dict]:
-        agent_1_obs, agent_2_obs = observations[:, 0, ...], observations[:, 1, ...]
-        masks = [
-            np.stack([info[-1] for info in infos[agent.id]])
-            for agent in (agent1, agent2)
-        ]
-
-        actions = np.stack(
-            [agent1.act(agent_1_obs, masks[0]), agent2.act(agent_2_obs, masks[1])],
-            axis=1,
-        )
-
-        observations, _, terminated, truncated, infos = envs.step(actions)
-        return observations, terminated, truncated, infos
+    def _env_creator(self, names: List[str]) -> GymnasiumGenerals:
+        return self.env_factory.create_environment(names)
 
     def _process_game_results(
         self, infos: Dict, wins: Dict[str, int], agent1_id: str, agent2_id: str
