@@ -3,8 +3,10 @@ import numpy as np
 import argparse
 import torch
 from generals.remote import GeneralsIOClient
-from supervised.neuro_agent import OnlineAgent
+from supervised.agent import OnlineAgent
 from supervised.network import Network
+# from checkpoints.network import Network
+# from checkpoints.neuro_tensor import OnlineAgent
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -54,7 +56,7 @@ def join_game_loop(client, agent, lobby_id):
 def main():
     args = parse_arguments()
 
-    checkpoint_path = "checkpoints/sup114/epoch=0-step=52000.ckpt"
+    checkpoint_path = "checkpoints/sup169/epoch=0-step=32000.ckpt"
     agent = initialize_agent(checkpoint_path)
 
     with GeneralsIOClient(agent, args.user_id, args.public) as client:
