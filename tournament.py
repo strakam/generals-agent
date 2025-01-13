@@ -21,8 +21,8 @@ from supervised.agent import NeuroAgent
 class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
-    n_envs: int = 128
-    num_games: int = 250
+    n_envs: int = 4  # 128
+    num_games: int = 10  # 250
     checkpoint_dir: str = "checkpoints/sup169"
     min_grid_size: int = 15
     max_grid_size: int = 24
@@ -114,10 +114,10 @@ class NeptuneLogger:
         matchup = f"{agent1_id}_vs_{agent2_id}"
         total_games = self.config.num_games
         self.run[f"matchups/{matchup}"] = {
-            "agent1_wins": wins[agent1_id],
-            "agent2_wins": wins[agent2_id],
-            "agent1_winrate": wins[agent1_id] / total_games,
-            "agent2_winrate": wins[agent2_id] / total_games,
+            f"{agent1_id}_wins": wins[agent1_id],
+            f"{agent2_id}_wins": wins[agent2_id],
+            f"{agent1_id}_winrate": wins[agent1_id] / total_games,
+            f"{agent2_id}_winrate": wins[agent2_id] / total_games,
         }
 
     def log_heatmap(self, heatmap_path: str):
