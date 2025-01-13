@@ -128,7 +128,7 @@ def main():
     trainer = training_module.create_trainer()
 
     # Start training
-    if config.model_checkpoint:
+    if config.model_ckpt:
         trainer.fit(model, train_dataloaders=dataloader, ckpt_path=config.model_ckpt)
     else:
         trainer.fit(model, train_dataloaders=dataloader)
