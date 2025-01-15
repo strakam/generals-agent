@@ -22,7 +22,7 @@ class TrainingConfig:
     n_workers: int = 32
 
     # Training parameters
-    learning_rate: float = 2e-4
+    learning_rate: float = 1.4e-4
     n_epochs: int = 8
     clip_val: float = 2.0
     seed: int = 42
@@ -32,7 +32,7 @@ class TrainingConfig:
     checkpoint_every_n_steps: int = 4000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/checkpoints"
     neptune_token_path: str = "neptune_token.txt"
-    model_ckpt: str = "epoch=0-step=32000.ckpt"
+    model_ckpt: str = None
 
     def __post_init__(self):
         """Calculate dependent parameters after initialization."""
