@@ -53,7 +53,7 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        single_tile_army_normalize = 120
+        single_tile_army_normalize = 200
         timestep_normalize = 200
         army_normalize = 400
         land_normalize = 150
