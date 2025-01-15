@@ -21,11 +21,11 @@ from supervised.agent import NeuroAgent
 class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
-    n_envs: int = 4  # 128
-    num_games: int = 10  # 250
-    checkpoint_dir: str = "checkpoints/sup169"
+    n_envs: int = 256
+    num_games: int = 250
+    checkpoint_dir: str = "checkpoints/sup196"
     min_grid_size: int = 15
-    max_grid_size: int = 24
+    max_grid_size: int = 23
     mountain_density: float = 0.08
     city_density: float = 0.05
     truncation_steps: int = 1500
@@ -53,6 +53,7 @@ class EnvironmentFactory:
             agents=agent_names,
             grid_factory=grid_factory,
             truncation=self.config.truncation_steps,
+            pad_observations_to=24,
         )
 
 
@@ -190,7 +191,8 @@ class ResultVisualizer:
         self,
         winrates: List[List[float]],
         agent_names: List[str],
-        output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
+        # output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
+        output_path: str = "tournament_heatmap.png",
     ):
         plt.figure(figsize=(8, 6))
         mask = np.eye(len(agent_names), dtype=bool)
@@ -209,14 +211,16 @@ class ResultVisualizer:
         return output_path
 
     def _configure_plot(self, agent_names: List[str]):
+        labels = [name.split(".")[0].split("=")[-1] for name in agent_names]
+        labels = [str(int(label) // 1000) for label in labels]
         plt.xticks(
             ticks=np.arange(len(agent_names)) + 0.5,
-            labels=[name.split("=")[-1] for name in agent_names],
+            labels=labels,
             rotation=45,
         )
         plt.yticks(
             ticks=np.arange(len(agent_names)) + 0.5,
-            labels=[name.split("=")[-1] for name in agent_names],
+            labels=labels,
             rotation=0,
         )
         plt.title("Agent Win Rates")
@@ -231,7 +235,8 @@ def main():
 
     try:
         # Load agents
-        checkpoint_files = sorted(os.listdir(config.checkpoint_dir))
+        checkpoint_files = sorted(os.listdir(config.checkpoint_dir))[::2]
+        print(checkpoint_files)
         agents = [
             agent_loader.load_agent(f"{config.checkpoint_dir}/{cp}")
             for cp in checkpoint_files
@@ -241,6 +246,7 @@ def main():
         winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
         for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
             wins = evaluator.run_matchup(agent1, agent2)
+            print("done")
             winrates[i][j] = wins[agent1.id] / config.num_games
             winrates[j][i] = wins[agent2.id] / config.num_games
 
