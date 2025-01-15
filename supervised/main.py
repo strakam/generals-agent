@@ -23,7 +23,7 @@ class TrainingConfig:
 
     # Training parameters
     learning_rate: float = 1.4e-4
-    n_epochs: int = 8
+    n_epochs: int = 16
     clip_val: float = 2.0
     seed: int = 42
 
