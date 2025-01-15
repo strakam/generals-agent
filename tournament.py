@@ -1,3 +1,4 @@
+import json
 import gymnasium as gym
 import os
 from pathlib import Path
@@ -26,8 +27,8 @@ class ExperimentConfig:
     checkpoint_dir: str = "checkpoints/sup196"
     min_grid_size: int = 15
     max_grid_size: int = 23
-    mountain_density: float = 0.08
-    city_density: float = 0.05
+    mountain_density: float = 0.15
+    city_density: float = 0.03
     truncation_steps: int = 1500
     channel_sequence: List[int] = (256, 320, 384, 384)
     neptune_project: str = "strakam/supervised-agent"
@@ -65,6 +66,7 @@ class AgentLoader:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def load_agent(self, checkpoint_path: str) -> NeuroAgent:
+        print(f"Loading agent from {checkpoint_path}")
         network = torch.load(checkpoint_path, map_location=self.device)
         model = self._initialize_model(network["state_dict"])
         agent_id = Path(checkpoint_path).stem.split("=")[-1]
@@ -191,8 +193,8 @@ class ResultVisualizer:
         self,
         winrates: List[List[float]],
         agent_names: List[str],
-        # output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
-        output_path: str = "tournament_heatmap.png",
+        output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
+        # output_path: str = "tournament_heatmap.png",
     ):
         plt.figure(figsize=(8, 6))
         mask = np.eye(len(agent_names), dtype=bool)
@@ -235,7 +237,7 @@ def main():
 
     try:
         # Load agents
-        checkpoint_files = sorted(os.listdir(config.checkpoint_dir))[::2]
+        checkpoint_files = sorted(os.listdir(config.checkpoint_dir))
         print(checkpoint_files)
         agents = [
             agent_loader.load_agent(f"{config.checkpoint_dir}/{cp}")
@@ -246,11 +248,12 @@ def main():
         winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
         for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
             wins = evaluator.run_matchup(agent1, agent2)
-            print("done")
             winrates[i][j] = wins[agent1.id] / config.num_games
             winrates[j][i] = wins[agent2.id] / config.num_games
 
         # Visualize results
+        path = "storage/praha1/home/strakam3/winrates.json"
+        json.dump(winrates, open(path, "w"))
         heatmap_path = visualizer.create_heatmap(winrates, checkpoint_files)
         neptune_logger.log_heatmap(heatmap_path)
 
