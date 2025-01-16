@@ -252,6 +252,7 @@ def main():
             winrates[i][j] = wins[agent1.id] / config.num_games
             winrates[j][i] = wins[agent2.id] / config.num_games
 
+        print(winrates)
         # Visualize results
         path = f"{config.output_directory}/winrates.json"
         json.dump(winrates, open(path, "w"))
