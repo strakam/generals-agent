@@ -32,6 +32,7 @@ class ExperimentConfig:
     truncation_steps: int = 1500
     channel_sequence: List[int] = (256, 320, 384, 384)
     neptune_project: str = "strakam/supervised-agent"
+    output_directory: str = "/storage/praha1/home/strakam3"
 
 
 class EnvironmentFactory:
@@ -193,7 +194,7 @@ class ResultVisualizer:
         self,
         winrates: List[List[float]],
         agent_names: List[str],
-        output_path: str = "/storage/praha1/home/strakam3/tournament_heatmap.png",
+        output_path: str = "tournament_heatmap.png",
         # output_path: str = "tournament_heatmap.png",
     ):
         plt.figure(figsize=(8, 6))
@@ -252,9 +253,13 @@ def main():
             winrates[j][i] = wins[agent2.id] / config.num_games
 
         # Visualize results
-        path = "storage/praha1/home/strakam3/winrates.json"
+        path = f"{config.output_directory}/winrates.json"
         json.dump(winrates, open(path, "w"))
-        heatmap_path = visualizer.create_heatmap(winrates, checkpoint_files)
+        heatmap_path = visualizer.create_heatmap(
+            winrates,
+            checkpoint_files,
+            f"{config.output_directory}/tournament_heatmap.png",
+        )
         neptune_logger.log_heatmap(heatmap_path)
 
     finally:

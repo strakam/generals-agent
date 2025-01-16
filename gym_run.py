@@ -4,61 +4,65 @@ import gymnasium as gym
 import torch
 from generals.envs import GymnasiumGenerals
 from supervised.network import Network
-from supervised.neuro_tensor import NeuroAgent
+from supervised.agent import NeuroAgent
 from generals import GridFactory
 
-n_envs = 3
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-key_file = open("neptune_token.txt", "r")
-key = key_file.read()
-run = neptune.init_run(
-    project="strakam/supervised-agent",
-    api_token=key,
-)
-
-
-def load_agent(path, channel_sequence=[256, 320, 384, 384]) -> NeuroAgent:
-    # Map location based on availability
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    network = torch.load(path, map_location=device)
-    state_dict = network["state_dict"]
-    model = Network(channel_sequence=channel_sequence, compile=True)
-    model_keys = model.state_dict().keys()
-    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
-    model.load_state_dict(filtered_state_dict)
-    model.eval()
-    agent = NeuroAgent(
-        model, id=path.split("/")[-1].split(".")[0], batch_size=n_envs, device=device
-    )
-    return agent
-
-
+n_envs = 1
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#
+# key_file = open("neptune_token.txt", "r")
+# key = key_file.read()
+# run = neptune.init_run(
+#     project="strakam/supervised-agent",
+#     api_token=key,
+# )
+#
+#
+# def load_agent(path, channel_sequence=[256, 320, 384, 384]) -> NeuroAgent:
+#     # Map location based on availability
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     network = torch.load(path, map_location=device)
+#     state_dict = network["state_dict"]
+#     model = Network(channel_sequence=channel_sequence, compile=True)
+#     model_keys = model.state_dict().keys()
+#     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
+#     model.load_state_dict(filtered_state_dict)
+#     model.eval()
+#     agent = NeuroAgent(
+#         model, id=path.split("/")[-1].split(".")[0], batch_size=n_envs, device=device
+#     )
+#     return agent
+#
+#
 gf = GridFactory(
     min_grid_dims=(15, 15),
     max_grid_dims=(24, 24),
 )
-
-agents = {
-    "agent1": load_agent(
-        "checkpoints/epoch=0-step=40000.ckpt",
-        channel_sequence=[320, 384, 448, 448],
-    ),
-    "agent2": load_agent("checkpoints/epoch=0-step=52000.ckpt"),
-}
+#
+# agents = {
+#     "agent1": load_agent(
+#         "checkpoints/epoch=0-step=40000.ckpt",
+#         channel_sequence=[320, 384, 448, 448],
+#     ),
+#     "agent2": load_agent("checkpoints/epoch=0-step=52000.ckpt"),
+# }
 agent_names = ["agent1", "agent2"]
 
 # Create environment
 envs = gym.vector.AsyncVectorEnv(
     [
         lambda: GymnasiumGenerals(
-            agent_ids=agent_names, grid_factory=gf, truncation=1500, pad_to=24
+            agents=agent_names, grid_factory=gf, truncation=1500, pad_observations_to=24
         )
         for _ in range(n_envs)
     ],
 )
 observations, infos = envs.reset()
-
+print(observations.shape, type(observations))
+# print how much space in megabytes does it take
+n_samples = 300_000
+print(observations.nbytes / 1024 / 1024 * n_samples, "MB")
+exit()
 done = False
 t = 0
 ended = 0
