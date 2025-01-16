@@ -14,7 +14,7 @@ class Network(L.LightningModule):
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = 34, 24, 24
+        c, h, w = 32, 24, 24
         self.lr = lr
         self.n_steps = n_steps
 
@@ -53,9 +53,9 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        single_tile_army_normalize = 200
+        single_tile_army_normalize = 300
         timestep_normalize = 200
-        army_normalize = 400
+        army_normalize = 600
         land_normalize = 150
 
         obs[:, :4, :, :] = obs[:, :4, :, :] / single_tile_army_normalize
@@ -65,7 +65,7 @@ class Network(L.LightningModule):
         obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
         obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-        obs[:, 24:, :, :] = obs[:, 24:, :, :] / single_tile_army_normalize
+        obs[:, 22:, :, :] = obs[:, 22:, :, :] / single_tile_army_normalize
         return obs
 
     # @torch.compile

@@ -29,8 +29,8 @@ class TrainingConfig:
 
     # Logging and checkpointing
     log_every_n_steps: int = 20
-    checkpoint_every_n_steps: int = 4000
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/checkpoints"
+    checkpoint_every_n_steps: int = 5000
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/sup_checkpoints/"
     neptune_token_path: str = "neptune_token.txt"
     model_ckpt: str = None
 

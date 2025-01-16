@@ -40,7 +40,7 @@ class NeuroAgent(Agent):
         self.network = network
         self.history_size = history_size
         self.batch_size = batch_size
-        self.n_channels = 24 + 2 * history_size
+        self.n_channels = 22 + 2 * history_size
         self.device = device
 
         if self.network is not None:
@@ -68,8 +68,6 @@ class NeuroAgent(Agent):
         self.seen = torch.zeros(shape, device=device).bool()
         self.i_know_enemy_seen = torch.zeros(shape, device=device).bool()
         self.i_know_enemy_owns = torch.zeros(shape, device=device).bool()
-        self.x_coords = torch.arange(24, device=device).view(1, 1, -1).expand(shape)
-        self.y_coords = torch.arange(24, device=device).view(1, -1, 1).expand(shape)
         self.last_observation = torch.zeros(
             (self.batch_size, self.n_channels, 24, 24), device=device
         )
@@ -173,8 +171,6 @@ class NeuroAgent(Agent):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
-                self.x_coords / 24,
-                self.y_coords / 24,
                 self.i_know_enemy_owns,
             ],
             dim=1,
