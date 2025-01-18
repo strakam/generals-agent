@@ -137,7 +137,7 @@ class Network(L.LightningModule):
         # value_loss = self.value_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss
-        # loss
+
         # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
@@ -217,9 +217,6 @@ class Pyramid(nn.Module):
                 skip_channels.append(channels)
             self.encoder_stages.append(stage)
 
-        # self.reception_field_mixture = ConvResBlock(
-        #     stage_channels[-1], stage_channels[-1]
-        # )
         # Decoder stages
         self.decoder_stages = nn.ModuleList()
 

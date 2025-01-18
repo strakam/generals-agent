@@ -1,11 +1,16 @@
+from typing import Optional, Union, List, Tuple
 import torch
 import numpy as np
 from generals.core.action import Action, compute_valid_move_mask
 import lightning as L
 from generals.agents import Agent
 from generals.core.observation import Observation
-from torch.nn.functional import max_pool2d as max_pool2d
+from torch.nn.functional import max_pool2d
 from functools import wraps
+
+GRID_SIZE = 24
+DEFAULT_HISTORY_SIZE = 8
+DEFAULT_BATCH_SIZE = 1
 
 
 def conditional_compile(func):
@@ -26,21 +31,43 @@ def conditional_compile(func):
 
 
 class NeuroAgent(Agent):
+    """
+    Represents a neural network-based agent in the game.
+
+    Attributes:
+        network (Optional[L.LightningModule]): The neural network model.
+        id (str): Identifier for the agent.
+        history_size (Optional[int]): Number of past states to consider.
+        batch_size (Optional[int]): Batch size for processing.
+        device (torch.device): Device to run the computations on.
+        ... (other attributes)
+    """
+
     def __init__(
         self,
-        network: L.LightningModule | None = None,
+        network: Optional[L.LightningModule] = None,
         id: str = "Neuro",
-        history_size: int | None = 8,
-        batch_size: int | None = 1,
+        history_size: Optional[int] = 8,
+        batch_size: Optional[int] = 1,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         ),
     ):
+        """
+        Initializes the NeuroAgent with the specified parameters.
+
+        Args:
+            network (Optional[L.LightningModule]): The neural network model.
+            id (str): Identifier for the agent.
+            history_size (Optional[int]): Number of past states to consider.
+            batch_size (Optional[int]): Batch size for processing.
+            device (torch.device): Device to run the computations on.
+        """
         super().__init__(id)
         self.network = network
-        self.history_size = history_size
-        self.batch_size = batch_size
-        self.n_channels = 18 + 4 * history_size
+        self.history_size = history_size or DEFAULT_HISTORY_SIZE
+        self.batch_size = batch_size or DEFAULT_BATCH_SIZE
+        self.n_channels = 18 + 4 * self.history_size
         self.device = device
 
         if self.network is not None:
@@ -52,35 +79,42 @@ class NeuroAgent(Agent):
     def reset(self):
         """
         Reset the agent's internal state.
-        The state contains things that the agent remembers over time (positions of generals, etc.).
         """
-        shape = (self.batch_size, 24, 24)
-        history_shape = (self.batch_size, self.history_size, 24, 24)
+        shape = (self.batch_size, GRID_SIZE, GRID_SIZE)
+        history_shape = (self.batch_size, self.history_size, GRID_SIZE, GRID_SIZE)
 
         device = self.device
-        self.army_stack = torch.zeros(history_shape, device=device)
-        self.enemy_stack = torch.zeros(history_shape, device=device)
-        self.last_army = torch.zeros(shape, device=device)
-        self.last_enemy_army = torch.zeros(shape, device=device)
-        self.cities = torch.zeros(shape, device=device).bool()
-        self.generals = torch.zeros(shape, device=device).bool()
-        self.mountains = torch.zeros(shape, device=device).bool()
-        self.seen = torch.zeros(shape, device=device).bool()
-        self.i_know_enemy_seen = torch.zeros(shape, device=device).bool()
-        self.i_know_enemy_owns = torch.zeros(shape, device=device).bool()
-        self.last_observation = torch.zeros(
-            (self.batch_size, self.n_channels, 24, 24), device=device
-        )
-        self.army_diff_stack = torch.zeros(history_shape, device=device)
-        self.land_diff_stack = torch.zeros(history_shape, device=device)
+        tensor_specs = {
+            "army_stack": history_shape,
+            "enemy_stack": history_shape,
+            "last_army": shape,
+            "last_enemy_army": shape,
+            "army_diff_stack": history_shape,
+            "land_diff_stack": history_shape,
+            "army_diff_buffer": (self.batch_size, 10 * self.history_size),
+            "land_diff_buffer": (self.batch_size, 10 * self.history_size),
+            "last_observation": (
+                self.batch_size,
+                self.n_channels,
+                GRID_SIZE,
+                GRID_SIZE,
+            ),
+        }
 
-        # for each timestep, we want buffer that remembers army and land differences
-        self.army_diff_buffer = torch.zeros(
-            (self.batch_size, 10 * self.history_size), device=device
-        )
-        self.land_diff_buffer = torch.zeros(
-            (self.batch_size, 10 * self.history_size), device=device
-        )
+        bool_tensor_specs = {
+            "cities": shape,
+            "generals": shape, 
+            "mountains": shape,
+            "seen": shape,
+            "i_know_enemy_seen": shape,
+            "i_know_enemy_owns": shape,
+        }
+
+        for name, spec in tensor_specs.items():
+            setattr(self, name, torch.zeros(spec, device=device, dtype=torch.float))
+            
+        for name, spec in bool_tensor_specs.items():
+            setattr(self, name, torch.zeros(spec, device=device, dtype=torch.bool))
 
     @conditional_compile
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
@@ -104,24 +138,22 @@ class NeuroAgent(Agent):
         timestep = 13
         priority = 14
 
-        # note moves that enemy did based on changes in his army counts, same for us
-        army_stack_clone = self.army_stack.clone().to(self.device)
-        enemy_stack_clone = self.enemy_stack.clone().to(self.device)
-        self.army_stack[:, 1:, :, :] = army_stack_clone[:, :-1, :, :]
-        self.army_stack[:, 0, :, :] = (
-            obs[:, armies, :, :] * obs[:, owned_cells, :, :] - self.last_army
-        )
+        # Roll army stacks in-place
+        self.army_stack.copy_(torch.roll(self.army_stack, shifts=1, dims=1))
+        self.enemy_stack.copy_(torch.roll(self.enemy_stack, shifts=1, dims=1))
 
-        self.enemy_stack[:, 1:, :, :] = enemy_stack_clone[:, :-1, :, :]
-        self.enemy_stack[:, 0, :, :] = (
-            obs[:, armies, :, :] * obs[:, opponent_cells, :, :] - self.last_enemy_army
+        # Update newest entries in-place
+        self.army_stack[:, 0].copy_(
+            obs[:, armies] * obs[:, owned_cells] - self.last_army
+        )
+        self.enemy_stack[:, 0].copy_(
+            obs[:, armies] * obs[:, opponent_cells] - self.last_enemy_army
         )
 
         self.last_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
         self.last_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
         # Update sliding window of army and land differences
-        _timestep = obs[:, timestep, 0, 0]
         _army_diff = obs[:, owned_army_count, 0, 0] - obs[:, opponent_army_count, 0, 0]
         _land_diff = obs[:, owned_land_count, 0, 0] - obs[:, opponent_land_count, 0, 0]
 
@@ -186,34 +218,34 @@ class NeuroAgent(Agent):
         # TODO: reduce useless features, add features that count stuff
         channels = torch.stack(
             [
-                obs[:, armies, :, :] * obs[:, owned_cells, :, :], # 0
-                obs[:, armies, :, :] * obs[:, opponent_cells, :, :], # 1
-                obs[:, armies, :, :] * obs[:, neutral_cells, :, :], # 2
-                self.seen, # 3
-                self.i_know_enemy_seen, # 4
-                self.i_know_enemy_owns, # 5
-                self.generals, # 6
-                self.cities, # 7
-                self.mountains, # 8
-                obs[:, owned_cells, :, :], # 9
-                obs[:, structures_in_fog, :, :], # 10
-                obs[:, timestep, :, :] * ones, # 11
-                (obs[:, timestep, :, :] % 50) * ones / 50, # 12
-                obs[:, priority, :, :] * ones, # 13
-                obs[:, owned_land_count, :, :] * ones, # 14
-                obs[:, opponent_land_count, :, :] * ones, # 15
-                obs[:, owned_army_count, :, :] * ones, # 16
-                obs[:, opponent_army_count, :, :] * ones, # 17
+                obs[:, armies, :, :] * obs[:, owned_cells, :, :],  # 0
+                obs[:, armies, :, :] * obs[:, opponent_cells, :, :],  # 1
+                obs[:, armies, :, :] * obs[:, neutral_cells, :, :],  # 2
+                self.seen,  # 3
+                self.i_know_enemy_seen,  # 4
+                self.i_know_enemy_owns,  # 5
+                self.generals,  # 6
+                self.cities,  # 7
+                self.mountains,  # 8
+                obs[:, owned_cells, :, :],  # 9
+                obs[:, structures_in_fog, :, :],  # 10
+                obs[:, timestep, :, :] * ones,  # 11
+                (obs[:, timestep, :, :] % 50) * ones / 50,  # 12
+                obs[:, priority, :, :] * ones,  # 13
+                obs[:, owned_land_count, :, :] * ones,  # 14
+                obs[:, opponent_land_count, :, :] * ones,  # 15
+                obs[:, owned_army_count, :, :] * ones,  # 16
+                obs[:, opponent_army_count, :, :] * ones,  # 17
             ],
             dim=1,
         )
         augmented_obs = torch.cat(
             [
                 channels,
-                army_diff_channels, # 18:18+history_size
-                land_diff_channels, # 18+history_size:18+2*history_size
-                self.army_stack, # 18+2*history_size:18+3*history_size
-                self.enemy_stack, # 18+3*history_size:18+4*history_size
+                army_diff_channels,  # 18:18+history_size
+                land_diff_channels,  # 18+history_size:18+2*history_size
+                self.army_stack,  # 18+2*history_size:18+3*history_size
+                self.enemy_stack,  # 18+3*history_size:18+4*history_size
             ],
             dim=1,
         )
@@ -235,8 +267,8 @@ class NeuroAgent(Agent):
 
         square = torch.argmax(square, dim=1)
         direction = torch.argmax(direction, dim=1)
-        row = square // 24
-        col = square % 24
+        row = square // GRID_SIZE
+        col = square % GRID_SIZE
         zeros = torch.zeros(self.batch_size).to(self.device)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         # actions, where direction is 4, set the first value to 1
@@ -286,17 +318,18 @@ class OnlineAgent(NeuroAgent):
     def precompile(self):
         # Run the agent once to precompile the code
         self.reset()
-        self.augment_observation(torch.zeros((1, 15, 24, 24)))
+        self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)))
+        shape = (GRID_SIZE, GRID_SIZE)
         obs = Observation(
-            armies=np.zeros((24, 24)),
-            generals=np.zeros((24, 24)),
-            cities=np.zeros((24, 24)),
-            mountains=np.zeros((24, 24)),
-            neutral_cells=np.zeros((24, 24)),
-            owned_cells=np.zeros((24, 24)),
-            opponent_cells=np.zeros((24, 24)),
-            fog_cells=np.zeros((24, 24)),
-            structures_in_fog=np.zeros((24, 24)),
+            armies=np.zeros(shape),
+            generals=np.zeros(shape),
+            cities=np.zeros(shape),
+            mountains=np.zeros(shape),
+            neutral_cells=np.zeros(shape),
+            owned_cells=np.zeros(shape),
+            opponent_cells=np.zeros(shape),
+            fog_cells=np.zeros(shape),
+            structures_in_fog=np.zeros(shape),
             owned_land_count=0,
             owned_army_count=0,
             opponent_land_count=0,
