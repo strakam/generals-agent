@@ -23,7 +23,7 @@ from supervised.agent import NeuroAgent
 class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
-    n_envs: int = 128
+    n_envs: int = 192
     num_games: int = 256
     checkpoint_dir: str = "checkpoints/sup220"
     min_grid_size: int = 15
@@ -152,7 +152,6 @@ class AgentEvaluator:
         observations, infos = envs.reset()
         wins = {agent1.id: 0, agent2.id: 0}
         ended_games = 0
-
         while ended_games < self.config.num_games:
             # for each agent, get the action
             actions = []
@@ -163,11 +162,14 @@ class AgentEvaluator:
             actions = np.stack(actions, axis=1)
 
             # game step
-            observations, _, terminated, _, infos = envs.step(actions)
+            observations, _, terminated, truncated, infos = envs.step(actions)
             if any(terminated):
                 ended_games += self._process_game_results(
                     infos, wins, agent1.id, agent2.id
                 )
+            if any(truncated):
+                ended_games += sum(truncated)
+                
 
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
