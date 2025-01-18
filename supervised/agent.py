@@ -30,7 +30,7 @@ class NeuroAgent(Agent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
+        history_size: int | None = 8,
         batch_size: int | None = 1,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
@@ -40,7 +40,7 @@ class NeuroAgent(Agent):
         self.network = network
         self.history_size = history_size
         self.batch_size = batch_size
-        self.n_channels = 22 + 2 * history_size
+        self.n_channels = 18 + 4 * history_size
         self.device = device
 
         if self.network is not None:
@@ -70,6 +70,16 @@ class NeuroAgent(Agent):
         self.i_know_enemy_owns = torch.zeros(shape, device=device).bool()
         self.last_observation = torch.zeros(
             (self.batch_size, self.n_channels, 24, 24), device=device
+        )
+        self.army_diff_stack = torch.zeros(history_shape, device=device)
+        self.land_diff_stack = torch.zeros(history_shape, device=device)
+
+        # for each timestep, we want buffer that remembers army and land differences
+        self.army_diff_buffer = torch.zeros(
+            (self.batch_size, 10 * self.history_size), device=device
+        )
+        self.land_diff_buffer = torch.zeros(
+            (self.batch_size, 10 * self.history_size), device=device
         )
 
     @conditional_compile
@@ -110,6 +120,31 @@ class NeuroAgent(Agent):
         self.last_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
         self.last_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
+        # Update sliding window of army and land differences
+        _timestep = obs[:, timestep, 0, 0]
+        _army_diff = obs[:, owned_army_count, 0, 0] - obs[:, opponent_army_count, 0, 0]
+        _land_diff = obs[:, owned_land_count, 0, 0] - obs[:, opponent_land_count, 0, 0]
+
+        self.army_diff_buffer = torch.roll(self.army_diff_buffer, shifts=-1, dims=1)
+        self.army_diff_buffer[:, -1] = _army_diff
+
+        self.land_diff_buffer = torch.roll(self.land_diff_buffer, shifts=-1, dims=1)
+        self.land_diff_buffer[:, -1] = _land_diff
+
+        army_diff_channels = (
+            self.army_diff_buffer[:, ::10]
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .expand(-1, -1, 24, 24)
+        )
+
+        land_diff_channels = (
+            self.land_diff_buffer[:, ::10]
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .expand(-1, -1, 24, 24)
+        )
+
         # what i've seen
         self.seen = torch.logical_or(
             self.seen,
@@ -148,35 +183,40 @@ class NeuroAgent(Agent):
         self.mountains |= obs[:, mountains, :, :].bool()
 
         ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        # TODO: reduce useless features, add features that count stuff
         channels = torch.stack(
             [
-                obs[:, armies, :, :],
-                obs[:, armies, :, :] * obs[:, owned_cells, :, :],
-                obs[:, armies, :, :] * obs[:, opponent_cells, :, :],
-                obs[:, armies, :, :] * obs[:, neutral_cells, :, :],
-                self.seen,
-                self.i_know_enemy_seen,
-                self.generals,
-                self.cities,
-                self.mountains,
-                obs[:, neutral_cells, :, :],
-                obs[:, owned_cells, :, :],
-                obs[:, opponent_cells, :, :],
-                obs[:, fog_cells, :, :],
-                obs[:, structures_in_fog, :, :],
-                obs[:, timestep, :, :] * ones,
-                (obs[:, timestep, :, :] % 50) * ones / 50,
-                obs[:, priority, :, :] * ones,
-                obs[:, owned_land_count, :, :] * ones,
-                obs[:, owned_army_count, :, :] * ones,
-                obs[:, opponent_land_count, :, :] * ones,
-                obs[:, opponent_army_count, :, :] * ones,
-                self.i_know_enemy_owns,
+                obs[:, armies, :, :] * obs[:, owned_cells, :, :], # 0
+                obs[:, armies, :, :] * obs[:, opponent_cells, :, :], # 1
+                obs[:, armies, :, :] * obs[:, neutral_cells, :, :], # 2
+                self.seen, # 3
+                self.i_know_enemy_seen, # 4
+                self.i_know_enemy_owns, # 5
+                self.generals, # 6
+                self.cities, # 7
+                self.mountains, # 8
+                obs[:, owned_cells, :, :], # 9
+                obs[:, structures_in_fog, :, :], # 10
+                obs[:, timestep, :, :] * ones, # 11
+                (obs[:, timestep, :, :] % 50) * ones / 50, # 12
+                obs[:, priority, :, :] * ones, # 13
+                obs[:, owned_land_count, :, :] * ones, # 14
+                obs[:, opponent_land_count, :, :] * ones, # 15
+                obs[:, owned_army_count, :, :] * ones, # 16
+                obs[:, opponent_army_count, :, :] * ones, # 17
             ],
             dim=1,
         )
-        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
-        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
+        augmented_obs = torch.cat(
+            [
+                channels,
+                army_diff_channels, # 18:18+history_size
+                land_diff_channels, # 18+history_size:18+2*history_size
+                self.army_stack, # 18+2*history_size:18+3*history_size
+                self.enemy_stack, # 18+3*history_size:18+4*history_size
+            ],
+            dim=1,
+        )
         self.last_observation = augmented_obs
         return augmented_obs
 
@@ -209,7 +249,7 @@ class SupervisedAgent(NeuroAgent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
+        history_size: int | None = 8,
         device: torch.device = "cpu",
     ):
         super().__init__(network, id, history_size, 1, device)

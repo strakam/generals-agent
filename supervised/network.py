@@ -11,13 +11,14 @@ class Network(L.LightningModule):
         n_steps: int = 100000,
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
+        history_size: int = 8,
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = 32, 24, 24
+        c, h, w = 18 + 4 * history_size, 24, 24
         self.lr = lr
         self.n_steps = n_steps
-
+        self.history_size = history_size
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
@@ -53,40 +54,42 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        single_tile_army_normalize = 300
+        single_tile_army_normalize = 200
         timestep_normalize = 200
-        army_normalize = 600
+        army_normalize = 300
         land_normalize = 150
 
-        obs[:, :4, :, :] = obs[:, :4, :, :] / single_tile_army_normalize
-        obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
+        # Normalize army counts for owned, opponent, neutral
+        obs[:, :3, :, :] = obs[:, :3, :, :] / single_tile_army_normalize
 
-        obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
-        obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
-        obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-        obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-        obs[:, 22:, :, :] = obs[:, 22:, :, :] / single_tile_army_normalize
+        # Normalize timestep and priority
+        obs[:, 11, :, :] = obs[:, 11, :, :] / timestep_normalize
+
+        # Normalize land and army counts (indices 14-17)
+        obs[:, 14:16, :, :] = obs[:, 14:16, :, :] / land_normalize  # land counts
+        obs[:, 16:18, :, :] = obs[:, 16:18, :, :] / army_normalize  # army counts
+        # Calculate indices for different sections
+        army_diff_start = 18
+        land_diff_start = army_diff_start + self.history_size
+        army_stack_start = land_diff_start + self.history_size
+        enemy_stack_start = army_stack_start + self.history_size
+
+        # Normalize army difference channels
+        obs[:, army_diff_start:land_diff_start, :, :] /= army_normalize
+
+        # Normalize land difference channels  
+        obs[:, land_diff_start:army_stack_start, :, :] /= land_normalize
+
+        # Normalize army and enemy stacks
+        obs[:, army_stack_start:enemy_stack_start, :, :] /= single_tile_army_normalize
+        obs[:, enemy_stack_start:enemy_stack_start + self.history_size, :, :] /= single_tile_army_normalize
+
         return obs
 
-    # @torch.compile
-    # def normalize_observations(self, obs):
-    #     timestep_normalize = 500
-    #     army_normalize = 500
-    #     land_normalize = 200
-    #
-    #     obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
-    #     obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
-    #
-    #     obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
-    #     obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
-    #     obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-    #     obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-    #     obs[:, 24:, :, :] = obs[:, 24:, :, :] / army_normalize
-    #     return obs
 
     @torch.compile
     def prepare_masks(self, obs, direction_mask):
-        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
+        square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9 # 9 is owned cells
         direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
         pad_h = 24 - direction_mask.shape[2]
         pad_w = 24 - direction_mask.shape[3]

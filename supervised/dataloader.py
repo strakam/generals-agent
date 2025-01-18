@@ -27,14 +27,25 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
 
-    def check_validity(self, obs, mask, action, stars):
-        # Check if the action is valid, return False if not
-        _, i, j, d, _ = action
-        army = obs[1][i][j]
-        passing = d == 4
-        valid_move = d < 4 and mask[i][j][d] == 1 and army > 1
-        is_high_elo = stars >= 70
-        return is_high_elo and (passing or valid_move)
+    def check_validity(self, obs: np.ndarray, mask: np.ndarray, action: np.ndarray, stars: int) -> bool:
+        """
+        Check if an action is valid and from a high-rated player.
+        """
+        _, i, j, direction, _ = action
+        army_size = obs[0][i][j]
+        
+        # Check if passing or making valid move with sufficient army
+        is_passing = direction == 4
+        is_valid_move = (
+            direction < 4 and 
+            mask[i][j][direction] == 1 and
+            army_size > 1
+        )
+        
+        # Only use moves from high-rated players
+        is_high_rated = stars >= 70
+        
+        return is_high_rated and (is_passing or is_valid_move)
 
     def save_sample(self, obs, mask, value, action):
         self.buffer[self.buffer_idx][0][:] = obs
@@ -50,12 +61,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
     def teacher_action(self, moves, base, timestep):
         # throw indicates whether action should be used in training
         if timestep in moves:
-            action = moves[timestep]
-            throw = False
-        else:
-            action = [1, base[0], base[1], 4, 0]
-            throw = True
-        return action, throw
+            return moves[timestep], False
+        return [1, base[0], base[1], 4, 0], True
 
     def __iter__(self):
         a, b = self.A.id, self.B.id
@@ -69,32 +76,30 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                     self.buffer_idx += 1
                 self.buffer_idx = 0
                 self.filled = False
+                
             timestep = obs[a]["timestep"]
-            # Take teacher actions
-            a0, throw0 = self.teacher_action(moves[0], bases[0], timestep)
-            a1, throw1 = self.teacher_action(moves[1], bases[1], timestep)
-            actions = {a: a0, b: a1}
-            # Ignore these actions, just process observations
-            _ = self.A.act(obs[a])
-            _ = self.B.act(obs[b])
-            obs_a = self.A.last_observation[0]
-            obs_b = self.B.last_observation[0]
-            mask_a = compute_valid_move_mask(obs[a])
-            mask_b = compute_valid_move_mask(obs[b])
-            # Save valid observation/action pairs
-            if (
-                self.check_validity(obs_a, mask_a, actions[a], stars[0])
-                and timestep > 21
-                and not throw0
-            ):
-                self.save_sample(obs_a, mask_a, values[0], actions[a])
-            if (
-                self.check_validity(obs_b, mask_b, actions[b], stars[1])
-                and timestep > 21
-                and not throw1
-            ):
-                self.save_sample(obs_b, mask_b, values[1], actions[b])
+            
+            # Process both agents
+            agents = [(self.A, a, 0), (self.B, b, 1)]
+            actions = {}
+            for agent, agent_id, idx in agents:
+                # Get teacher action
+                action, throw = self.teacher_action(moves[idx], bases[idx], timestep)
+                actions[agent_id] = action
+                
+                # Process observation
+                _ = agent.act(obs[agent_id])
+                agent_obs = agent.last_observation[0]
+                agent_mask = compute_valid_move_mask(obs[agent_id])
+                
+                # Save valid samples
+                if (self.check_validity(agent_obs, agent_mask, action, stars[idx]) 
+                    and timestep > 21 
+                    and not throw):
+                    self.save_sample(agent_obs, agent_mask, values[idx], action)
+                    
             obs, _, terminated, _, _ = self.env.step(actions)
+            
             if terminated or timestep >= length:
                 map, moves, values, bases, length, stars = self.get_new_replay()
                 obs, _ = self.env.reset(options={"grid": map})
