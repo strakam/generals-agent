@@ -23,7 +23,7 @@ from supervised.agent import NeuroAgent
 class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
-    n_envs: int = 256
+    n_envs: int = 128
     num_games: int = 256
     checkpoint_dir: str = "checkpoints/sup220"
     min_grid_size: int = 15
@@ -168,7 +168,6 @@ class AgentEvaluator:
                 ended_games += self._process_game_results(
                     infos, wins, agent1.id, agent2.id
                 )
-            t += 1
 
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
@@ -251,6 +250,7 @@ def main():
         # Run tournament
         winrates = [[0 for _ in range(len(agents))] for _ in range(len(agents))]
         for (i, agent1), (j, agent2) in combinations(enumerate(agents), 2):
+            print(f"Running matchup: {agent1.id} vs {agent2.id}")
             wins = evaluator.run_matchup(agent1, agent2)
             winrates[i][j] = wins[agent1.id] / config.num_games
             winrates[j][i] = wins[agent2.id] / config.num_games
