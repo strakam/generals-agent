@@ -56,7 +56,7 @@ def join_game_loop(client, agent, lobby_id):
 def main():
     args = parse_arguments()
 
-    checkpoint_path = "checkpoints/sup212/step=64000.ckpt"
+    checkpoint_path = "checkpoints/sup220/step=80000.ckpt"
     agent = initialize_agent(checkpoint_path)
 
     with GeneralsIOClient(agent, args.user_id, args.public) as client:

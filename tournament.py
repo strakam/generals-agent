@@ -1,16 +1,17 @@
+import os
 import json
 import gymnasium as gym
-import os
 from pathlib import Path
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from itertools import combinations
 from dataclasses import dataclass
 from typing import List, Dict
 from torch import nn
 import neptune
+
+from itertools import combinations
 
 from generals import GridFactory
 from generals.envs import GymnasiumGenerals
@@ -23,13 +24,13 @@ class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
     n_envs: int = 256
-    num_games: int = 250
-    checkpoint_dir: str = "checkpoints/sup196"
+    num_games: int = 256
+    checkpoint_dir: str = "checkpoints/sup220"
     min_grid_size: int = 15
     max_grid_size: int = 23
     mountain_density: float = 0.15
     city_density: float = 0.03
-    truncation_steps: int = 1500
+    truncation_steps: int = 800
     channel_sequence: List[int] = (256, 320, 384, 384)
     neptune_project: str = "strakam/supervised-agent"
     output_directory: str = "/storage/praha1/home/strakam3"
@@ -43,6 +44,7 @@ class EnvironmentFactory:
 
     def create_grid_factory(self) -> GridFactory:
         return GridFactory(
+            mode="generalsio",
             min_grid_dims=(self.config.min_grid_size, self.config.min_grid_size),
             max_grid_dims=(self.config.max_grid_size, self.config.max_grid_size),
             mountain_density=self.config.mountain_density,
@@ -150,6 +152,7 @@ class AgentEvaluator:
         observations, infos = envs.reset()
         wins = {agent1.id: 0, agent2.id: 0}
         ended_games = 0
+        t=0
 
         while ended_games < self.config.num_games:
             # for each agent, get the action
@@ -166,6 +169,8 @@ class AgentEvaluator:
                 ended_games += self._process_game_results(
                     infos, wins, agent1.id, agent2.id
                 )
+            t += 1
+            print(t)
 
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
