@@ -152,7 +152,6 @@ class AgentEvaluator:
         observations, infos = envs.reset()
         wins = {agent1.id: 0, agent2.id: 0}
         ended_games = 0
-        t=0
 
         while ended_games < self.config.num_games:
             # for each agent, get the action
@@ -170,7 +169,6 @@ class AgentEvaluator:
                     infos, wins, agent1.id, agent2.id
                 )
             t += 1
-            print(t)
 
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
