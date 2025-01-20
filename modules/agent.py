@@ -41,7 +41,6 @@ class NeuroAgent(Agent):
         history_size (Optional[int]): Number of past states to consider.
         batch_size (Optional[int]): Batch size for processing.
         device (torch.device): Device to run the computations on.
-        ... (other attributes)
     """
 
     def __init__(
@@ -260,8 +259,8 @@ class NeuroAgent(Agent):
         """
         if isinstance(obs, np.ndarray):
             obs = torch.from_numpy(obs).float().to(self.device)
-        else:
-            obs = obs.float().to(self.device)
+
+        obs = obs.float().to(self.device)
         self.augment_observation(obs)
         mask = torch.from_numpy(mask).float().to(self.device)
 
@@ -306,7 +305,6 @@ class OnlineAgent(NeuroAgent):
         ),
     ):
         super().__init__(network, id, history_size, 1, device)
-        self.network.eval()
 
     def act(self, obs: Observation) -> Action:
         """

@@ -331,3 +331,27 @@ class Lambda(nn.Module):
     @torch.compile
     def forward(self, x):
         return self.func(x)
+
+def load_network(path: str, eval_mode: bool = True) -> Network:
+    """Load a network from a checkpoint file.
+    
+    Args:
+        path: Path to the checkpoint file
+        eval_mode: Whether to put the model in evaluation mode
+    
+    Returns:
+        Network: Loaded network
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = torch.load(path, map_location=device)
+    state_dict = checkpoint["state_dict"]
+    
+    model = Network(compile=True)
+    model_keys = model.state_dict().keys()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
+    model.load_state_dict(filtered_state_dict)
+    
+    if eval_mode:
+        model.eval()
+        
+    return model

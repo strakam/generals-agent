@@ -17,6 +17,7 @@ datasets/
 .neptune/
 
 *.tar
+*.ckpt
 
 # C extensions
 *.so
