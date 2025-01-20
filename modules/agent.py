@@ -22,9 +22,9 @@ def conditional_compile(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if isinstance(self, (NeuroAgent, OnlineAgent)) and not isinstance(
-            self, SupervisedAgent
-        ):
+        if isinstance(
+            self, (NeuroAgent, OnlineAgent, SelfPlayAgent)
+        ) and not isinstance(self, SupervisedAgent):
             return torch.compile(func)(self, *args, **kwargs)
         return func(self, *args, **kwargs)
 
@@ -116,6 +116,28 @@ class NeuroAgent(Agent):
         for name, spec in bool_tensor_specs.items():
             setattr(self, name, torch.zeros(spec, device=device, dtype=torch.bool))
 
+    def reset_histories(self, obs: torch.Tensor):
+        # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
+        timestep_mask = obs[:, 13, 0, 0] == 0.0
+
+        attributes_to_reset = [
+            "army_stack",
+            "enemy_stack",
+            "army_diff_buffer",
+            "land_diff_buffer",
+            "last_army",
+            "last_enemy_army",
+            "seen",
+            "i_know_enemy_seen",
+            "i_know_enemy_owns",
+            "cities",
+            "generals",
+            "mountains",
+        ]
+
+        for attr in attributes_to_reset:
+            getattr(self, attr)[timestep_mask] = 0
+
     @conditional_compile
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         """
@@ -137,6 +159,12 @@ class NeuroAgent(Agent):
         opponent_army_count = 12
         timestep = 13
         priority = 14
+
+        if obs.device != self.device:
+            obs = obs.to(self.device)
+
+        # Reset histories if needed
+        self.reset_histories(obs)
 
         # Roll army stacks in-place
         self.army_stack.copy_(torch.roll(self.army_stack, shifts=1, dims=1))
@@ -215,7 +243,6 @@ class NeuroAgent(Agent):
         self.mountains |= obs[:, mountains, :, :].bool()
 
         ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
-        # TODO: reduce useless features, add features that count stuff
         channels = torch.stack(
             [
                 obs[:, armies, :, :] * obs[:, owned_cells, :, :],  # 0
@@ -278,6 +305,44 @@ class NeuroAgent(Agent):
         return actions.cpu().numpy().astype(int)
 
 
+class SelfPlayAgent(NeuroAgent):
+    def __init__(
+        self,
+        network: L.LightningModule | None = None,
+        id: str = "Neuro",
+        history_size: int | None = 8,
+        batch_size: int = 1,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
+    ):
+        super().__init__(network, id, history_size, batch_size, device)
+
+    @conditional_compile
+    def act(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            square_logits, direction_logits = self.network(obs, mask)
+
+        square = torch.argmax(square_logits, dim=1)
+        direction = torch.argmax(direction_logits, dim=1)
+        row = square // GRID_SIZE
+        col = square % GRID_SIZE
+        zeros = torch.zeros(self.batch_size).to(self.device)
+        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        actions[actions[:, 3] == 4, 0] = 1
+
+        # Get log probabilities of selected actions
+        square_logprob = torch.log_softmax(square_logits, dim=1)[
+            torch.arange(square.shape[0]), square
+        ]
+        direction_logprob = torch.log_softmax(direction_logits, dim=1)[
+            torch.arange(direction.shape[0]), direction
+        ]
+        logprob = square_logprob + direction_logprob
+
+        return actions, logprob
+
+
 class SupervisedAgent(NeuroAgent):
     def __init__(
         self,
@@ -317,7 +382,11 @@ class OnlineAgent(NeuroAgent):
         return action
 
     def precompile(self):
-        # Run the agent once to precompile the code
+        """
+        Precompile the agent to speed up inference.
+        This is because when an agent plays first game, it would be idle for a while
+        because it needs to compile the code.
+        """
         self.reset()
         self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)))
         shape = (GRID_SIZE, GRID_SIZE)
@@ -372,7 +441,9 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
     if mode == "online":
         agent = OnlineAgent(model, id=agent_id, device=device)
     elif mode == "supervised":
-        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
+        agent = SupervisedAgent(
+            model, id=agent_id, batch_size=batch_size, device=device
+        )
     else:  # "base" or default case
         agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
 
