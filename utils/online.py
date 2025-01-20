@@ -1,12 +1,8 @@
 import time
 import numpy as np
 import argparse
-import torch
 from generals.remote import GeneralsIOClient
-from supervised.agent import OnlineAgent
-from supervised.network import Network
-# from checkpoints.network import Network
-# from checkpoints.neuro_tensor import OnlineAgent
+from modules.agent import OnlineAgent, load_agent
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -15,26 +11,6 @@ def parse_arguments():
     parser.add_argument("--public", default=False, action="store_true", help="Flag to join a public lobby")
     parser.add_argument("--user_id", default="trLflJK8s45a", type=str, help="User ID for the agent")
     return parser.parse_args()
-
-def load_model_checkpoint(checkpoint_path):
-    """Loads the model checkpoint and initializes the model."""
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    state_dict = checkpoint["state_dict"]
-
-    model = Network(compile=True)
-    model_keys = model.state_dict().keys()
-    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
-    model.load_state_dict(filtered_state_dict)
-
-    return model
-
-def initialize_agent(checkpoint_path):
-    """Initializes the agent with the loaded model."""
-    model = load_model_checkpoint(checkpoint_path)
-
-    agent = OnlineAgent(model)
-    agent.precompile()
-    return agent
 
 def join_game_loop(client, agent, lobby_id):
     """Main loop for joining and playing games."""
@@ -53,11 +29,22 @@ def join_game_loop(client, agent, lobby_id):
         elif client.status == "lobby":
             client.join_game()
 
+def load_online_agent(checkpoint_path: str) -> OnlineAgent:
+    """Load an agent for online play"""
+    agent = load_agent(
+        checkpoint_path,
+        batch_size=1,  # Online play is always single instance
+        eval_mode=True,
+        mode="online"
+    )
+    agent.precompile()  # Ensure the agent is ready for real-time play
+    return agent
+
 def main():
     args = parse_arguments()
 
-    checkpoint_path = "checkpoints/sup220/step=80000.ckpt"
-    agent = initialize_agent(checkpoint_path)
+    checkpoint_path = "checkpoints/sup280/step=95000.ckpt"
+    agent = load_online_agent(checkpoint_path)
 
     with GeneralsIOClient(agent, args.user_id, args.public) as client:
         join_game_loop(client, agent, args.lobby)

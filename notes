@@ -1,47 +1,25 @@
-- Network (architecture, size)
-- Learning rate (and optimizer), other hparams, sample weights, class weights
-- Features?
-- Training only on the best replays - make bigger dataset?
+QEUSTIONS:
 - Value function not yet working (tanh?)
 - is50 not working yet, only sending all armies
-- smaller dataset with higher quality data better (?)
 - postprocessing ?
-
 - CAREFUL WITH ARGMAX AND SAMPLING
-
 - train without its previous actions?
 
-- Dev dataset?
+- Checkpoints from later training have bigger winrate but overfit more, what now?
 
-Replays:
-https://bot.generals.io/replays/gV9UZ4Q3p -- I won, tough game. Good location hiding, poor defense at the end.
-https://bot.generals.io/replays/0a3f4KhJV -- bot won. didnt know where the enemy was and also underestimated
-that he can send so much army at the end, wp. Also good effort by bot to find my base.
-https://bot.generals.io/replays/HPLdogxGJ -- bot won vs jonas. Epic defense, when he discovered enemy, went extremely well for the kill. Very suboptimal opening.
-https://bot.generals.io/replays/ocMoDl4Ld -- jonas won, bot was unlucky + then fucked up by sending army to city.
-https://bot.generals.io/replays/d4MTm24z1 -- bot won, nice location hiding, EPIC BACKDOOR!!!
-https://bot.generals.io/replays/bOTYg3ZfY -- bot won, extremely long game, i couldnt find him, got tired in the end and made a mistake.
-https://bot.generals.io/replays/kD-AoxK1K -- I won! long game, nice defense from bot but i snowballed!
-https://bot.generals.io/replays/L9Drlub3s -- I won! nice pressure but i did surpise attack
+IDEAS:
+- Clip large observations
+- Add distances from general (also from enemy general ?) as features
+- Add channel saying whether I can capture a city or not. This should be learned tho..
+
 
 WEAKNESSES:
-https://generals.io/replays/3lq5z1EK8?p=Average+Joe
+Getting stuck
+   - https://generals.io/replays/1x9k1EDC0?p=Average+Joe
+   - https://generals.io/replays/BvoOEVt96?p=Average+Joe
+Doesnt take cities "in one charge"
 
 
-Strongest: ...
 
-
-112: 2 
-114: 8
-Both ~ 50k
-
-game vs eklipzai https://bot.generals.io/replays/2lWNnfnAW
+HIGHLIGHTS:
 https://bot.generals.io/replays/yEQGogdnS !!! miracle move fr
-https://bot.generals.io/replays/HDtAy3Cm7 lost vs eklipzai, had advantage but didnt defend
-
-
-
-TODOS:
-- 1. evaluation workflow (checkpoints)
-- 4. training run without conditioning on previous actions
------------

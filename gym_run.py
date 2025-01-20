@@ -1,11 +1,9 @@
 import neptune
 import numpy as np
 import gymnasium as gym
-import torch
 from generals.envs import GymnasiumGenerals
-from supervised.network import Network
-from supervised.agent import NeuroAgent
 from generals import GridFactory
+from modules.agent import load_agent
 
 n_envs = 1
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -38,14 +36,18 @@ gf = GridFactory(
     min_grid_dims=(15, 15),
     max_grid_dims=(24, 24),
 )
-#
-# agents = {
-#     "agent1": load_agent(
-#         "checkpoints/epoch=0-step=40000.ckpt",
-#         channel_sequence=[320, 384, 448, 448],
-#     ),
-#     "agent2": load_agent("checkpoints/epoch=0-step=52000.ckpt"),
-# }
+
+# Load agents using the new module
+agents = {
+    "agent1": load_agent(
+        "checkpoints/epoch=0-step=40000.ckpt",
+        batch_size=n_envs,
+    ),
+    "agent2": load_agent(
+        "checkpoints/epoch=0-step=52000.ckpt",
+        batch_size=n_envs
+    ),
+}
 agent_names = ["agent1", "agent2"]
 
 # Create environment
@@ -60,11 +62,6 @@ envs = gym.vector.AsyncVectorEnv(
 observations, infos = envs.reset()
 print(observations.shape, type(observations))
 # print how much space in megabytes does it take
-n_samples = 300_000
-print(observations.nbytes / 1024 / 1024 * n_samples, "MB")
-exit()
-done = False
-t = 0
 ended = 0
 wins = {agent: 0 for agent in agent_names}
 while ended < 100:

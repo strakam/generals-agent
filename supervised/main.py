@@ -7,7 +7,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
-from network import Network
+from modules.network import Network
+from modules.agent import load_agent
 
 
 @dataclass
@@ -17,7 +18,7 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
-    buffer_size: int = 90
+    buffer_size: int = 17000
     batch_size: int = 1792
     n_workers: int = 32
     # Training parameters
@@ -109,8 +110,14 @@ class TrainingModule:
 
     def create_model(self) -> Network:
         """Create and configure the model."""
-        model = Network(lr=self.config.learning_rate, compile=True)
-        return model
+        if self.config.model_ckpt:
+            agent = load_agent(
+                self.config.model_ckpt,
+                batch_size=self.config.batch_size,
+                eval_mode=False  # For training, we don't want eval mode
+            )
+            return agent.network
+        return Network(lr=self.config.learning_rate, compile=True)
 
 
 def main():

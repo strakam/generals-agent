@@ -1,4 +1,4 @@
-from typing import Optional, Union, List, Tuple
+from typing import Optional
 import torch
 import numpy as np
 from generals.core.action import Action, compute_valid_move_mask
@@ -7,6 +7,7 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
+from modules.network import Network
 
 GRID_SIZE = 24
 DEFAULT_HISTORY_SIZE = 8
@@ -103,7 +104,7 @@ class NeuroAgent(Agent):
 
         bool_tensor_specs = {
             "cities": shape,
-            "generals": shape, 
+            "generals": shape,
             "mountains": shape,
             "seen": shape,
             "i_know_enemy_seen": shape,
@@ -112,7 +113,7 @@ class NeuroAgent(Agent):
 
         for name, spec in tensor_specs.items():
             setattr(self, name, torch.zeros(spec, device=device, dtype=torch.float))
-            
+
         for name, spec in bool_tensor_specs.items():
             setattr(self, name, torch.zeros(spec, device=device, dtype=torch.bool))
 
@@ -259,6 +260,8 @@ class NeuroAgent(Agent):
         """
         if isinstance(obs, np.ndarray):
             obs = torch.from_numpy(obs).float().to(self.device)
+        else:
+            obs = obs.float().to(self.device)
         self.augment_observation(obs)
         mask = torch.from_numpy(mask).float().to(self.device)
 
@@ -297,7 +300,7 @@ class OnlineAgent(NeuroAgent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
+        history_size: int | None = 8,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         ),
@@ -339,3 +342,40 @@ class OnlineAgent(NeuroAgent):
         )
         self.act(obs)
         print("Precompiled the agent")
+
+
+def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
+    """Load a trained agent from a checkpoint file.
+
+    Args:
+        path: Path to the checkpoint file
+        batch_size: Batch size for the agent
+        mode: Type of agent to create ("online", "supervised", or "base")
+        eval_mode: Whether to put the model in evaluation mode
+
+    Returns:
+        NeuroAgent: Loaded agent ready for inference
+    """
+    # Map location based on availability
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    network = torch.load(path, map_location=device)
+    state_dict = network["state_dict"]
+
+    model = Network(channel_sequence=[256, 320, 384, 384], compile=True)
+    model_keys = model.state_dict().keys()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
+    model.load_state_dict(filtered_state_dict)
+
+    if eval_mode:
+        model.eval()
+
+    agent_id = path.split("/")[-1].split(".")[0]
+
+    if mode == "online":
+        agent = OnlineAgent(model, id=agent_id, device=device)
+    elif mode == "supervised":
+        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
+    else:  # "base" or default case
+        agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
+
+    return agent

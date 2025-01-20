@@ -1,6 +1,6 @@
 from generals.envs import PettingZooGenerals
 from generals.core.action import compute_valid_move_mask
-from agent import SupervisedAgent
+from modules.agent import SupervisedAgent
 import json
 import torch
 import math
