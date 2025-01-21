@@ -18,11 +18,11 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
-    buffer_size: int = 17000
+    buffer_size: int = 18000
     batch_size: int = 1792
     n_workers: int = 32
     # Training parameters
-    learning_rate: float = 1.1e-4
+    learning_rate: float = 5e-5
     n_epochs: int = 16
     clip_val: float = 2.0
     seed: int = 42
@@ -32,7 +32,7 @@ class TrainingConfig:
     checkpoint_every_n_steps: int = 5000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/sup_checkpoints/"
     neptune_token_path: str = "neptune_token.txt"
-    model_ckpt: str = None
+    model_ckpt: str = "step=52000.ckpt"
 
     def __post_init__(self):
         """Calculate dependent parameters after initialization."""
@@ -108,16 +108,6 @@ class TrainingModule:
             callbacks=[self._create_checkpoint_callback()],
         )
 
-    def create_model(self) -> Network:
-        """Create and configure the model."""
-        if self.config.model_ckpt:
-            agent = load_agent(
-                self.config.model_ckpt,
-                batch_size=self.config.batch_size,
-                eval_mode=False  # For training, we don't want eval mode
-            )
-            return agent.network
-        return Network(lr=self.config.learning_rate, compile=True)
 
 
 def main():
@@ -130,13 +120,18 @@ def main():
 
     # Setup training
     training_module = TrainingModule(config)
-    model = training_module.create_model()
     trainer = training_module.create_trainer()
 
     # Start training
     if config.model_ckpt:
-        trainer.fit(model, train_dataloaders=dataloader, ckpt_path=config.model_ckpt)
+        # Load checkpoint but override learning rate
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = Network(lr=config.learning_rate, compile=True)
+        state_dict = torch.load(config.model_ckpt, map_location=device)["state_dict"]
+        model.load_state_dict(state_dict)
+        trainer.fit(model, train_dataloaders=dataloader)
     else:
+        model = Network(lr=config.learning_rate, compile=True)
         trainer.fit(model, train_dataloaders=dataloader)
 
 

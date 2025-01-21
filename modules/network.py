@@ -127,7 +127,7 @@ class Network(L.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.n_steps, eta_min=5e-6
+            optimizer, T_max=self.n_steps, eta_min=1e-5
         )
         return {
             "optimizer": optimizer,
@@ -157,6 +157,9 @@ class Network(L.LightningModule):
 
             # Log the gradient norm for this module
             self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
+
+        # also log learning rate
+        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
 
 
 class Pyramid(nn.Module):

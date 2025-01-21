@@ -47,8 +47,8 @@ class NeuroAgent(Agent):
         self,
         network: Optional[L.LightningModule] = None,
         id: str = "Neuro",
-        history_size: Optional[int] = 8,
-        batch_size: Optional[int] = 1,
+        history_size: Optional[int] = DEFAULT_HISTORY_SIZE,
+        batch_size: Optional[int] = DEFAULT_BATCH_SIZE,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         ),
@@ -65,9 +65,9 @@ class NeuroAgent(Agent):
         """
         super().__init__(id)
         self.network = network
-        self.history_size = history_size or DEFAULT_HISTORY_SIZE
-        self.batch_size = batch_size or DEFAULT_BATCH_SIZE
-        self.n_channels = 18 + 4 * self.history_size
+        self.history_size = history_size
+        self.batch_size = batch_size
+        self.n_channels = 21 + 2 * self.history_size
         self.device = device
 
         if self.network is not None:
@@ -81,7 +81,6 @@ class NeuroAgent(Agent):
         Reset the agent's internal state.
         The state contains things that the agent remembers over time (positions of generals, etc.).
         """
-        n_channels = 21 + 2 * self.history_size
         shape = (self.batch_size, 24, 24)
         history_shape = (self.batch_size, self.history_size, 24, 24)
 
@@ -96,7 +95,7 @@ class NeuroAgent(Agent):
         self.seen = torch.zeros(shape, device=device).bool()
         self.enemy_seen = torch.zeros(shape, device=device).bool()
         self.last_observation = torch.zeros(
-            (self.batch_size, n_channels, 24, 24), device=device
+            (self.batch_size, self.n_channels, 24, 24), device=device
         )
 
     def reset_histories(self, obs: torch.Tensor):
@@ -235,8 +234,8 @@ class SelfPlayAgent(NeuroAgent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
-        batch_size: int = 1,
+        history_size: int | None = DEFAULT_HISTORY_SIZE,
+        batch_size: int = DEFAULT_BATCH_SIZE,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         ),
@@ -273,7 +272,7 @@ class SupervisedAgent(NeuroAgent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
+        history_size: int | None = DEFAULT_HISTORY_SIZE,
         device: torch.device = "cpu",
     ):
         super().__init__(network, id, history_size, 1, device)
@@ -289,7 +288,7 @@ class OnlineAgent(NeuroAgent):
         self,
         network: L.LightningModule | None = None,
         id: str = "Neuro",
-        history_size: int | None = 5,
+        history_size: int | None = DEFAULT_HISTORY_SIZE,
         device: torch.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         ),
