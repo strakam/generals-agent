@@ -11,14 +11,13 @@ class Network(L.LightningModule):
         n_steps: int = 100000,
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
-        history_size: int = 8,
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = 18 + 4 * history_size, 24, 24
+        c, h, w = 31, 24, 24
         self.lr = lr
         self.n_steps = n_steps
-        self.history_size = history_size
+
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
@@ -54,42 +53,23 @@ class Network(L.LightningModule):
 
     @torch.compile
     def normalize_observations(self, obs):
-        single_tile_army_normalize = 200
-        timestep_normalize = 200
-        army_normalize = 300
-        land_normalize = 150
+        timestep_normalize = 500
+        army_normalize = 500
+        land_normalize = 200
 
-        # Normalize army counts for owned, opponent, neutral
-        obs[:, :3, :, :] = obs[:, :3, :, :] / single_tile_army_normalize
+        obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
+        obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
 
-        # Normalize timestep and priority
-        obs[:, 11, :, :] = obs[:, 11, :, :] / timestep_normalize
-
-        # Normalize land and army counts (indices 14-17)
-        obs[:, 14:16, :, :] = obs[:, 14:16, :, :] / land_normalize  # land counts
-        obs[:, 16:18, :, :] = obs[:, 16:18, :, :] / army_normalize  # army counts
-        # Calculate indices for different sections
-        army_diff_start = 18
-        land_diff_start = army_diff_start + self.history_size
-        army_stack_start = land_diff_start + self.history_size
-        enemy_stack_start = army_stack_start + self.history_size
-
-        # Normalize army difference channels
-        obs[:, army_diff_start:land_diff_start, :, :] /= army_normalize
-
-        # Normalize land difference channels  
-        obs[:, land_diff_start:army_stack_start, :, :] /= land_normalize
-
-        # Normalize army and enemy stacks
-        obs[:, army_stack_start:enemy_stack_start, :, :] /= single_tile_army_normalize
-        obs[:, enemy_stack_start:enemy_stack_start + self.history_size, :, :] /= single_tile_army_normalize
-
+        obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
+        obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
+        obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
+        obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
+        obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
         return obs
-
 
     @torch.compile
     def prepare_masks(self, obs, direction_mask):
-        square_mask = (1 - obs[:, 9, :, :].unsqueeze(1)) * -1e9 # 9 is owned cells
+        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
         direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
         pad_h = 24 - direction_mask.shape[2]
         pad_w = 24 - direction_mask.shape[3]
@@ -137,7 +117,7 @@ class Network(L.LightningModule):
         # value_loss = self.value_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss
-
+        # loss
         # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
@@ -177,9 +157,6 @@ class Network(L.LightningModule):
 
             # Log the gradient norm for this module
             self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
-
-        # also store learning rate
-        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
 
 
 class Pyramid(nn.Module):
@@ -332,26 +309,27 @@ class Lambda(nn.Module):
     def forward(self, x):
         return self.func(x)
 
+
 def load_network(path: str, eval_mode: bool = True) -> Network:
     """Load a network from a checkpoint file.
-    
+
     Args:
         path: Path to the checkpoint file
         eval_mode: Whether to put the model in evaluation mode
-    
+
     Returns:
         Network: Loaded network
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(path, map_location=device)
     state_dict = checkpoint["state_dict"]
-    
+
     model = Network(compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
-    
+
     if eval_mode:
         model.eval()
-        
+
     return model
