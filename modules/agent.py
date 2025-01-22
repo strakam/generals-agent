@@ -105,13 +105,10 @@ class NeuroAgent(Agent):
         attributes_to_reset = [
             "army_stack",
             "enemy_stack",
-            "army_diff_buffer",
-            "land_diff_buffer",
             "last_army",
             "last_enemy_army",
             "seen",
-            "i_know_enemy_seen",
-            "i_know_enemy_owns",
+            "enemy_seen",
             "cities",
             "generals",
             "mountains",
@@ -141,6 +138,8 @@ class NeuroAgent(Agent):
         opponent_army_count = 12
         timestep = 13
         priority = 14
+
+        self.reset_histories(obs)
 
         # Calculate current army states
         current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]

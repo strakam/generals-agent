@@ -15,8 +15,8 @@ from itertools import combinations
 
 from generals import GridFactory
 from generals.envs import GymnasiumGenerals
-from supervised.network import Network
-from supervised.agent import NeuroAgent
+from modules.network import Network
+from modules.agent import NeuroAgent
 
 
 @dataclass
@@ -24,13 +24,13 @@ class ExperimentConfig:
     """Configuration parameters for the experiment."""
 
     n_envs: int = 192
-    num_games: int = 256
-    checkpoint_dir: str = "checkpoints/sup220"
+    num_games: int = 250
+    checkpoint_dir: str = "checkpoints/sup114"
     min_grid_size: int = 15
     max_grid_size: int = 23
     mountain_density: float = 0.15
     city_density: float = 0.03
-    truncation_steps: int = 800
+    truncation_steps: int = 1200
     channel_sequence: List[int] = (256, 320, 384, 384)
     neptune_project: str = "strakam/supervised-agent"
     output_directory: str = "/storage/praha1/home/strakam3"
@@ -43,13 +43,7 @@ class EnvironmentFactory:
         self.config = config
 
     def create_grid_factory(self) -> GridFactory:
-        return GridFactory(
-            mode="generalsio",
-            min_grid_dims=(self.config.min_grid_size, self.config.min_grid_size),
-            max_grid_dims=(self.config.max_grid_size, self.config.max_grid_size),
-            mountain_density=self.config.mountain_density,
-            city_density=self.config.city_density,
-        )
+        return GridFactory(mode="generalsio")
 
     def create_environment(self, agent_names: List[str]) -> GymnasiumGenerals:
         grid_factory = self.create_grid_factory()
@@ -169,7 +163,6 @@ class AgentEvaluator:
                 )
             if any(truncated):
                 ended_games += sum(truncated)
-                
 
         self.logger.log_matchup_results(agent1.id, agent2.id, wins)
         return wins
