@@ -8,16 +8,45 @@ import gymnasium as gym
 import argparse
 from modules.network import load_network
 from modules.agent import SelfPlayAgent
+import neptune
 
 
 @dataclass
 class SelfPlayConfig:
-    n_envs: int = 1
+    n_envs: int = 512
     training_iterations: int = 1000
-    n_steps: int = 10
+    n_steps: int = 5000
     truncation: int = 1500
     checkpoint_path: str = "step=52000.ckpt"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+class NeptuneLogger:
+    """Handles logging experiment metrics to Neptune."""
+
+    def __init__(self, config: SelfPlayConfig):
+        self.run = neptune.init_run(
+            project="strakam/selfplay",
+            name="generals-selfplay",
+            tags=["selfplay", "training"],
+        )
+        self.config = config
+        self._log_config()
+
+    def _log_config(self):
+        """Log experiment configuration parameters."""
+        self.run["parameters"] = {
+            "n_envs": self.config.n_envs,
+            "training_iterations": self.config.training_iterations,
+            "n_steps": self.config.n_steps,
+            "truncation": self.config.truncation,
+            "checkpoint_path": self.config.checkpoint_path,
+            "device": self.config.device,
+        }
+
+    def close(self):
+        """Close the Neptune run."""
+        self.run.stop()
 
 
 def create_environment(
@@ -51,6 +80,7 @@ def train_agents(
 def main(args):
     # Initialize hyperparameters
     cfg = SelfPlayConfig()
+    logger = NeptuneLogger(cfg)
 
     # Load agent
     n_obs = 2 * cfg.n_envs
@@ -106,7 +136,9 @@ def main(args):
             next_done = torch.Tensor(next_done).to(device)
 
             if global_step > 500:
+                logger.close()
                 return
+        print(f"Iteration {iteration} completed")
 
 
 if __name__ == "__main__":
