@@ -13,9 +13,9 @@ import neptune
 
 @dataclass
 class SelfPlayConfig:
-    n_envs: int = 512
+    n_envs: int = 12
     training_iterations: int = 1000
-    n_steps: int = 5000
+    n_steps: int = 500
     truncation: int = 1500
     checkpoint_path: str = "step=52000.ckpt"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -93,30 +93,37 @@ def main(args):
 
     device = cfg.device
     n_channels = agent.n_channels
-    obs = torch.zeros((cfg.n_steps, 2 * cfg.n_envs, n_channels, 24, 24)).to(device)
-    actions = torch.zeros(cfg.n_steps, 2 * cfg.n_envs, 5).to(device)
-    logprobs = torch.zeros(cfg.n_steps, 2 * cfg.n_envs).to(device)
-    rewards = torch.zeros(cfg.n_steps, cfg.n_envs).to(device)
-    dones = torch.zeros(cfg.n_steps, cfg.n_envs).to(device)
+
+    obs_shape = (cfg.n_steps, 2 * cfg.n_envs, n_channels, 24, 24)
+    actions_shape = (cfg.n_steps, 2 * cfg.n_envs, 5)
+    logprobs_shape = (cfg.n_steps, 2 * cfg.n_envs)
+    rewards_shape = (cfg.n_steps, cfg.n_envs)
+    dones_shape = (cfg.n_steps, cfg.n_envs)
+
+    obs = torch.zeros(obs_shape, device=device, dtype=torch.float16)
+    actions = torch.zeros(actions_shape, device=device, dtype=torch.float16)
+    logprobs = torch.zeros(logprobs_shape, device=device)
+    rewards = torch.zeros(rewards_shape, device=device, dtype=torch.float16)
+    dones = torch.zeros(dones_shape, device=device, dtype=torch.bool)
 
     global_step = 0
 
     def prepare_observations(
         obs: np.ndarray, infos: dict
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        obs_tensor = torch.from_numpy(obs).float().to(device)
+        obs_tensor = torch.from_numpy(obs).half().to(device)  # half() converts to float16
         # remove the agent dimension and stack it into the first dimension
         reshaped_obs = obs_tensor.reshape(cfg.n_envs * 2, -1, 24, 24)
         augmented_obs = agent.augment_observation(reshaped_obs)
 
         mask = np.stack([info[4] for agent in agent_names for info in infos[agent]])
-        mask = torch.from_numpy(mask).to(device)
+        mask = torch.from_numpy(mask).bool().to(device)
 
         return augmented_obs, mask
 
     next_obs, infos = envs.reset()
     next_obs, mask = prepare_observations(next_obs, infos)
-    next_done = torch.zeros(cfg.n_envs).to(device)
+    next_done = torch.zeros(cfg.n_envs, device=device)
 
     for iteration in range(1, cfg.training_iterations + 1):
         for step in range(0, cfg.n_steps):
@@ -131,13 +138,10 @@ def main(args):
             _actions = actions[step].view(cfg.n_envs, 2, -1).cpu().numpy().astype(int)
             next_obs, reward, terminations, truncations, infos = envs.step(_actions)
             next_done = np.logical_or(terminations, truncations)
-            rewards[step] = torch.tensor(reward).to(device).view(-1)
+            rewards[step] = torch.tensor(reward, device=device).view(-1)
             next_obs, mask = prepare_observations(next_obs, infos)
-            next_done = torch.Tensor(next_done).to(device)
+            next_done = torch.tensor(next_done, device=device)
 
-            if global_step > 500:
-                logger.close()
-                return
         print(f"Iteration {iteration} completed")
 
 

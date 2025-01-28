@@ -170,7 +170,7 @@ class NeuroAgent(Agent):
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
 
-        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        ones = torch.ones((self.batch_size, 24, 24), device=self.device, dtype=torch.float16)
         channels = torch.stack(
             [
                 obs[:, armies, :, :],
@@ -198,7 +198,7 @@ class NeuroAgent(Agent):
             dim=1,
         )
         army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
-        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
+        augmented_obs = torch.cat([channels, army_stacks], dim=1).half()
         self.last_observation = augmented_obs
         return augmented_obs
 
@@ -212,7 +212,7 @@ class NeuroAgent(Agent):
 
         obs = obs.float().to(self.device)
         self.augment_observation(obs)
-        mask = torch.from_numpy(mask).float().to(self.device)
+        mask = torch.from_numpy(mask).bool().to(self.device)
 
         with torch.no_grad():
             square, direction = self.network(self.last_observation, mask)
@@ -221,7 +221,7 @@ class NeuroAgent(Agent):
         direction = torch.argmax(direction, dim=1)
         row = square // GRID_SIZE
         col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size).to(self.device)
+        zeros = torch.zeros(self.batch_size, device=self.device, dtype=torch.float16)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         # actions, where direction is 4, set the first value to 1
         actions[actions[:, 3] == 4, 0] = 1
@@ -250,7 +250,7 @@ class SelfPlayAgent(NeuroAgent):
         direction = torch.argmax(direction_logits, dim=1)
         row = square // GRID_SIZE
         col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size).to(self.device)
+        zeros = torch.zeros(self.batch_size, device=self.device, dtype=torch.float16)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         actions[actions[:, 3] == 4, 0] = 1
 
@@ -277,7 +277,7 @@ class SupervisedAgent(NeuroAgent):
         super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
-        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0).half()
         self.augment_observation(obs)
         return [1, 0, 0, 0, 0]  # pass
 
@@ -300,7 +300,7 @@ class OnlineAgent(NeuroAgent):
         """
         obs.pad_observation(24)
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
-        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0).half()
         action = super().act(obs, mask)[0]  # Take the only action
         return action
 
@@ -311,7 +311,7 @@ class OnlineAgent(NeuroAgent):
         because it needs to compile the code.
         """
         self.reset()
-        self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)))
+        self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)).half())
         shape = (GRID_SIZE, GRID_SIZE)
         obs = Observation(
             armies=np.zeros(shape),

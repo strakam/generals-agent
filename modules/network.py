@@ -4,6 +4,7 @@ from torch.nn import functional as F
 import lightning as L
 
 
+
 class Network(L.LightningModule):
     def __init__(
         self,
@@ -81,6 +82,8 @@ class Network(L.LightningModule):
         return square_mask, direction_mask
 
     def forward(self, obs, mask, teacher_cells=None):
+        obs = obs.float()
+        mask = mask.float()
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
         # value = self.value_head(x)
