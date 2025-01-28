@@ -85,17 +85,17 @@ class NeuroAgent(Agent):
         history_shape = (self.batch_size, self.history_size, 24, 24)
 
         device = self.device
-        self.army_stack = torch.zeros(history_shape, device=device)
-        self.enemy_stack = torch.zeros(history_shape, device=device)
-        self.last_army = torch.zeros(shape, device=device)
-        self.last_enemy_army = torch.zeros(shape, device=device)
+        self.army_stack = torch.zeros(history_shape, device=device, dtype=torch.float16)
+        self.enemy_stack = torch.zeros(history_shape, device=device, dtype=torch.float16)
+        self.last_army = torch.zeros(shape, device=device, dtype=torch.float16)
+        self.last_enemy_army = torch.zeros(shape, device=device, dtype=torch.float16)
         self.cities = torch.zeros(shape, device=device).bool()
         self.generals = torch.zeros(shape, device=device).bool()
         self.mountains = torch.zeros(shape, device=device).bool()
         self.seen = torch.zeros(shape, device=device).bool()
         self.enemy_seen = torch.zeros(shape, device=device).bool()
         self.last_observation = torch.zeros(
-            (self.batch_size, self.n_channels, 24, 24), device=device
+            (self.batch_size, self.n_channels, 24, 24), device=device, dtype=torch.float16
         )
 
     def reset_histories(self, obs: torch.Tensor):
@@ -156,15 +156,8 @@ class NeuroAgent(Agent):
         self.last_army = current_army
         self.last_enemy_army = current_enemy_army
 
-        self.seen = torch.logical_or(
-            self.seen,
-            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
-        )
-
-        self.enemy_seen = torch.logical_or(
-            self.enemy_seen,
-            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
-        )
+        self.seen |= max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool()
+        self.enemy_seen |= max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool()
 
         self.cities |= obs[:, cities, :, :].bool()
         self.generals |= obs[:, generals, :, :].bool()
@@ -208,9 +201,9 @@ class NeuroAgent(Agent):
         Based on a new observation, augment the internal state and return an action.
         """
         if isinstance(obs, np.ndarray):
-            obs = torch.from_numpy(obs).float().to(self.device)
+            obs = torch.from_numpy(obs).half().to(self.device)
 
-        obs = obs.float().to(self.device)
+        obs = obs.half().to(self.device)
         self.augment_observation(obs)
         mask = torch.from_numpy(mask).bool().to(self.device)
 
@@ -250,7 +243,7 @@ class SelfPlayAgent(NeuroAgent):
         direction = torch.argmax(direction_logits, dim=1)
         row = square // GRID_SIZE
         col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size, device=self.device, dtype=torch.float16)
+        zeros = torch.zeros(self.batch_size).to(self.device)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         actions[actions[:, 3] == 4, 0] = 1
 
@@ -277,7 +270,7 @@ class SupervisedAgent(NeuroAgent):
         super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
-        obs = torch.tensor(obs.as_tensor()).unsqueeze(0).half()
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         self.augment_observation(obs)
         return [1, 0, 0, 0, 0]  # pass
 
@@ -300,7 +293,7 @@ class OnlineAgent(NeuroAgent):
         """
         obs.pad_observation(24)
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
-        obs = torch.tensor(obs.as_tensor()).unsqueeze(0).half()
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action = super().act(obs, mask)[0]  # Take the only action
         return action
 
@@ -311,7 +304,7 @@ class OnlineAgent(NeuroAgent):
         because it needs to compile the code.
         """
         self.reset()
-        self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)).half())
+        self.augment_observation(torch.zeros((1, 15, GRID_SIZE, GRID_SIZE)))
         shape = (GRID_SIZE, GRID_SIZE)
         obs = Observation(
             armies=np.zeros(shape),
