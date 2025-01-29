@@ -13,12 +13,15 @@ import neptune
 
 @dataclass
 class SelfPlayConfig:
-    n_envs: int = 12
+    n_envs: int = 4
     training_iterations: int = 1000
-    n_steps: int = 500
+    n_steps: int = 20
     truncation: int = 1500
     checkpoint_path: str = "step=52000.ckpt"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # PPO parameters
+    gamma: float = 1.0
 
 
 class NeptuneLogger:
@@ -97,7 +100,7 @@ def main(args):
     obs_shape = (cfg.n_steps, 2 * cfg.n_envs, n_channels, 24, 24)
     actions_shape = (cfg.n_steps, 2 * cfg.n_envs, 5)
     logprobs_shape = (cfg.n_steps, 2 * cfg.n_envs)
-    rewards_shape = (cfg.n_steps, cfg.n_envs)
+    rewards_shape = (cfg.n_steps, 2 * cfg.n_envs)
     dones_shape = (cfg.n_steps, cfg.n_envs)
 
     obs = torch.zeros(obs_shape, device=device, dtype=torch.float16)
@@ -108,10 +111,12 @@ def main(args):
 
     global_step = 0
 
-    def prepare_observations(
+    def process_observations(
         obs: np.ndarray, infos: dict
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        obs_tensor = torch.from_numpy(obs).half().to(device)  # half() converts to float16
+        obs_tensor = (
+            torch.from_numpy(obs).half().to(device)
+        )  # half() converts to float16
         # remove the agent dimension and stack it into the first dimension
         reshaped_obs = obs_tensor.reshape(cfg.n_envs * 2, -1, 24, 24)
         augmented_obs = agent.augment_observation(reshaped_obs)
@@ -119,10 +124,14 @@ def main(args):
         mask = np.stack([info[4] for agent in agent_names for info in infos[agent]])
         mask = torch.from_numpy(mask).bool().to(device)
 
-        return augmented_obs, mask
+        # extract rewards from last index of infos for both agents, should be shape (cfg.n_envs, 2)
+        _rewards = torch.tensor(
+            [info[5] for agent in agent_names for info in infos[agent]], device=device
+        )
+        return augmented_obs, mask, _rewards
 
     next_obs, infos = envs.reset()
-    next_obs, mask = prepare_observations(next_obs, infos)
+    next_obs, mask, _rewards = process_observations(next_obs, infos)
     next_done = torch.zeros(cfg.n_envs, device=device)
 
     for iteration in range(1, cfg.training_iterations + 1):
@@ -136,11 +145,27 @@ def main(args):
             logprobs[step] = combined_logprob
 
             _actions = actions[step].view(cfg.n_envs, 2, -1).cpu().numpy().astype(int)
-            next_obs, reward, terminations, truncations, infos = envs.step(_actions)
+            next_obs, _, terminations, truncations, infos = envs.step(_actions)
+            next_obs, mask, _rewards = process_observations(next_obs, infos)
+            rewards[step] = _rewards
             next_done = np.logical_or(terminations, truncations)
-            rewards[step] = torch.tensor(reward, device=device).view(-1)
-            next_obs, mask = prepare_observations(next_obs, infos)
             next_done = torch.tensor(next_done, device=device)
+
+        # Calculate returns and advantages
+        returns = torch.zeros_like(rewards)
+
+        # Handle the final step separately since we don't have next_value
+        next_value = torch.zeros_like(rewards[0])
+        # Broadcast next_done to match the shape of rewards (2 agents per env)
+        next_non_terminal = torch.repeat_interleave(1.0 - next_done.float(), 2, dim=0)
+
+        # Iterate backwards through steps
+        for t in reversed(range(cfg.n_steps)):
+            # Calculate returns with discounting for terminal states
+            returns[t] = rewards[t] + cfg.gamma * next_value * next_non_terminal
+            next_value = returns[t]
+            # Broadcast dones to match the shape of rewards (2 agents per env)
+            next_non_terminal = torch.repeat_interleave(1.0 - dones[t].float(), 2, dim=0)
 
         print(f"Iteration {iteration} completed")
 
