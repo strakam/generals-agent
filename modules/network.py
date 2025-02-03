@@ -110,9 +110,8 @@ class Network(L.LightningModule):
         return loss
 
     def get_action(self, obs, mask, action=None):
-        obs = obs.float()
         mask = mask.float()
-        obs = self.normalize_observations(obs)
+        obs = self.normalize_observations(obs.float())
         x = self.backbone(obs)
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
@@ -122,10 +121,8 @@ class Network(L.LightningModule):
         square_probs = F.softmax(square_logits, dim=1)
         square_dist = torch.distributions.Categorical(square_probs)
         if action is None:
-            print("None")
             square = square_dist.sample()
         else:
-            print("Not None")
             square = action[:, 1] * 24 + action[:, 2]
 
         # Get direction logits based on sampled square
@@ -153,13 +150,11 @@ class Network(L.LightningModule):
 
         # Create action tensor with shape [batch_size, 5]
         zeros = torch.zeros_like(square, dtype=torch.float)
-        ones = torch.ones_like(square, dtype=torch.float)
         row = square // 24
         col = square % 24
-        action = torch.stack([ones, row, col, direction, zeros], dim=1)
+        action = torch.stack([zeros, row, col, direction, zeros], dim=1)
         # For direction 4 (pass), set first value to 1
         action[action[:, 3] == 4, 0] = 1
-        print(f"action shape: {action.shape}")
         return action, logprob, entropy
 
     def ppo_loss(self, batch, args):
@@ -168,12 +163,6 @@ class Network(L.LightningModule):
         actions = batch["actions"]
         returns = batch["returns"]
         logprobs = batch["logprobs"]
-
-        print(f"obs shape: {obs.shape}")
-        print(f"masks shape: {masks.shape}")
-        print(f"actions shape: {actions.shape}")
-        print(f"returns shape: {returns.shape}")
-        print(f"logprobs shape: {logprobs.shape}")
 
         _, newlogprobs, entropy = self.get_action(obs, masks, actions)
         logratio = newlogprobs - logprobs
@@ -185,6 +174,24 @@ class Network(L.LightningModule):
 
         entropy_loss = entropy.mean()
         loss = pg_loss - args.ent_coef * entropy_loss
+
+        # Log PPO-specific metrics
+        with torch.no_grad():
+            # Log policy metrics
+            self.log("ppo/policy_loss", pg_loss, on_step=True)
+            self.log("ppo/entropy", entropy_loss, on_step=True)
+            self.log("ppo/total_loss", loss, on_step=True)
+
+            # Log policy statistics
+            self.log("ppo/mean_ratio", ratio.mean(), on_step=True)
+            self.log("ppo/max_ratio", ratio.max(), on_step=True)
+            self.log("ppo/min_ratio", ratio.min(), on_step=True)
+
+            # Log value statistics
+            self.log("ppo/mean_returns", returns.mean(), on_step=True)
+            self.log("ppo/max_returns", returns.max(), on_step=True)
+            self.log("ppo/min_returns", returns.min(), on_step=True)
+
         return loss
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
