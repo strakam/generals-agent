@@ -168,12 +168,12 @@ def main(args):
     logger = NeptuneLogger(cfg, fabric)
 
     # Load agent
-    n_obs = 2 * cfg.n_envs
+    n_obs = cfg.n_envs
     network = load_network(cfg.checkpoint_path)
     optimizer, _ = network.configure_optimizers(lr=cfg.learning_rate)
     # Setup the network with Fabric
     network, optimizer = fabric.setup(network, optimizer)
-    agent = SelfPlayAgent(network=network, batch_size=n_obs // 2, device=fabric.device)
+    agent = SelfPlayAgent(network=network, batch_size=n_obs, device=fabric.device)
 
     # Setup environment
     agent_names = ["1", "2"]
@@ -181,12 +181,14 @@ def main(args):
 
     n_channels = agent.n_channels
 
-    obs_shape = (cfg.n_steps, 2 * cfg.n_envs, n_channels, 24, 24)
-    masks_shape = (cfg.n_steps, 2 * cfg.n_envs, 24, 24, 4)
-    actions_shape = (cfg.n_steps, 2 * cfg.n_envs, 5)
-    logprobs_shape = (cfg.n_steps, 2 * cfg.n_envs)
-    rewards_shape = (cfg.n_steps, 2 * cfg.n_envs)
-    dones_shape = (cfg.n_steps, cfg.n_envs)
+    # Update tensor shapes to have explicit agent dimension
+    n_agents = 2
+    obs_shape = (cfg.n_steps, cfg.n_envs, n_agents, n_channels, 24, 24)
+    masks_shape = (cfg.n_steps, cfg.n_envs, n_agents, 24, 24, 4)
+    actions_shape = (cfg.n_steps, cfg.n_envs, n_agents, 5)
+    logprobs_shape = (cfg.n_steps, cfg.n_envs, n_agents)
+    rewards_shape = (cfg.n_steps, cfg.n_envs, n_agents)
+    dones_shape = (cfg.n_steps, cfg.n_envs)  # Keeps same shape as it's per-environment
 
     # Initialize tensors using fabric's device context
     with fabric.device:
@@ -199,54 +201,38 @@ def main(args):
 
     global_step = 0
 
-    # Add these variables for episode tracking
-    episode_rewards = torch.zeros(2 * cfg.n_envs, device=fabric.device)
-    episode_lengths = torch.zeros(cfg.n_envs, device=fabric.device)
-    num_episodes = 0
-
     def process_observations(obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         with fabric.device:
             # Assume obs comes in with shape (n_envs, 2, channels, 24, 24)
             obs_tensor = torch.from_numpy(obs).half()
-            # Split the observation into two parts: one for the active agent and one for the dummy opponent.
-            # The shapes: (n_envs, channels, 24, 24)
-            active_obs = obs_tensor[:, 0, ...]
-            dummy_obs  = obs_tensor[:, 1, ...]
-            
-            # Process each separately via the agent's augmentation.
-            # This ensures that if the augmentation updates internal state (e.g. last_army),
-            # you keep the two roles separate.
-            augmented_active = agent.augment_observation(active_obs)
-            augmented_dummy = agent.augment_observation(dummy_obs)
 
-            # Print sum of channels 10 and 11 separately
-            channel_10_sum = augmented_active[:, 10].sum().item()
-            channel_11_sum = augmented_active[:, 11].sum().item()
-            print(f"Sum of owned cells: {channel_10_sum}")
-            print(f"Sum of opponent cells: {channel_11_sum}")
+            # Process each agent's observations separately
+            augmented_obs = []
+            for agent_idx in range(n_agents):
+                agent_obs = obs_tensor[:, agent_idx, ...]
+                augmented_agent_obs = agent.augment_observation(agent_obs)
+                augmented_obs.append(augmented_agent_obs)
 
-            
-            # Reassemble a tensor of shape (n_envs*2, new_channels, 24, 24)
-            augmented_obs = torch.stack([augmented_active, augmented_dummy], dim=1)
-            augmented_obs = augmented_obs.view(cfg.n_envs * 2, *augmented_active.shape[1:])
-            
-            # Process the mask as before, ensuring that we use the same ordering: (env0: agent1, agent2, env1: agent1, agent2, …)
-            _mask = torch.from_numpy(np.stack([
-                infos[agent][env_idx][4]
-                for env_idx in range(cfg.n_envs)
-                for agent in agent_names
-            ]))
-            mask = _mask.bool().reshape(cfg.n_envs * 2, 24, 24, 4)
-            
-            _rewards = torch.tensor([
-                infos[agent][env_idx][5]
-                for env_idx in range(cfg.n_envs)
-                for agent in agent_names
-            ])
-        return augmented_obs, mask, _rewards
+            # Stack along agent dimension (n_envs, n_agents, channels, 24, 24)
+            augmented_obs = torch.stack(augmented_obs, dim=1)
+
+            # Process masks and rewards for both agents
+            mask = torch.stack(
+                [
+                    torch.from_numpy(infos[agent_name][env_idx][4]).bool()
+                    for env_idx in range(cfg.n_envs)
+                    for agent_name in agent_names
+                ]
+            ).reshape(cfg.n_envs, n_agents, 24, 24, 4)
+
+            agent_1_rewards = torch.tensor([infos[agent_names[0]][env_idx][5] for env_idx in range(cfg.n_envs)])
+            agent_2_rewards = torch.tensor([infos[agent_names[1]][env_idx][5] for env_idx in range(cfg.n_envs)])
+            rewards = torch.stack([agent_1_rewards, agent_2_rewards], dim=1)
+
+        return augmented_obs, mask, rewards
 
     next_obs, infos = envs.reset()
-    next_obs, mask, _rewards = process_observations(next_obs, infos)
+    next_obs, mask, _ = process_observations(next_obs, infos)
     with fabric.device:
         next_done = torch.zeros(cfg.n_envs, dtype=torch.bool)
 
@@ -258,124 +244,66 @@ def main(args):
             masks[step] = mask
 
             with torch.no_grad():
-                # Get actions only for first player
-                player1_obs = next_obs[::2]  # Take every other observation for player 1
-                player1_mask = mask[::2]  # Take every other mask for player 1
+                # Get actions for player 1 (active player)
+                player1_obs = next_obs[:, 0]  # Shape: (n_envs, channels, 24, 24)
+                player1_mask = mask[:, 0]  # Shape: (n_envs, 24, 24, 4)
                 player1_actions, player1_logprobs, _ = network.get_action(player1_obs, player1_mask)
 
                 # Create dummy actions for player 2
                 dummy_actions = torch.ones_like(player1_actions)
-                dummy_actions[:, 1:] = 0  # Set all but first element to 0
+                dummy_actions[:, 1:] = 0
                 dummy_logprobs = torch.zeros_like(player1_logprobs)
 
-                # Store actions and logprobs
-                actions[step, ::2] = player1_actions
-                actions[step, 1::2] = dummy_actions
-                logprobs[step, ::2] = player1_logprobs
-                logprobs[step, 1::2] = dummy_logprobs
+                # Store actions and logprobs with explicit agent dimension
+                actions[step, :, 0] = player1_actions
+                actions[step, :, 1] = dummy_actions
+                logprobs[step, :, 0] = player1_logprobs
+                logprobs[step, :, 1] = dummy_logprobs
 
-            # Vectorized action assignment
-            _actions = (
-                actions[step].cpu().numpy().reshape(-1, 2, 5).astype(int)
-            )  # Shape: (n_envs, 2 players, 5 action dims)
-            print(f"Actions: {_actions}")
+            # Reshape actions for environment step
+            _actions = actions[step].cpu().numpy().astype(int)  # Shape: (n_envs, n_agents, 5)
             next_obs, _, terminations, truncations, infos = envs.step(_actions)
-            next_obs, mask, _rewards = process_observations(next_obs, infos)
-            rewards[step] = _rewards
+            next_obs, mask, step_rewards = process_observations(next_obs, infos)
+            rewards[step] = step_rewards
+
+            # Print rewards if any agent wins
+            if torch.any(step_rewards == 1):
+                fabric.print(f"Step {step} rewards with 1: {step_rewards}")
+
             next_done = np.logical_or(terminations, truncations)
             with fabric.device:
                 next_done = torch.tensor(next_done, dtype=torch.bool)
 
-            # Track episode stats
-            episode_rewards += _rewards
-            episode_lengths += 1
-
-            # Log completed episodes
-            if next_done.any():
-                for env_idx in range(cfg.n_envs):
-                    if next_done[env_idx]:
-                        num_episodes += 1
-                        # Log metrics for both agents in the finished episode
-                        agent1_idx = env_idx * 2
-                        agent2_idx = env_idx * 2 + 1
-
-                        if fabric.is_global_zero:
-                            # Log episode metrics
-                            fabric.log_dict(
-                                {
-                                    "episode/mean_length": episode_lengths[env_idx].item(),
-                                    "episode/agent1_reward": episode_rewards[agent1_idx].item(),
-                                    "episode/agent2_reward": episode_rewards[agent2_idx].item(),
-                                },
-                                step=global_step,
-                            )
-                            # Print episode metrics
-                            fabric.print(
-                                f"Episode {num_episodes}: "
-                                f"Length={episode_lengths[env_idx].item()}, "
-                                f"Agent1 Reward={episode_rewards[agent1_idx].item():.3f}, "
-                                f"Agent2 Reward={episode_rewards[agent2_idx].item():.3f}"
-                            )
-
-                        # Reset episode tracking for this environment
-                        episode_rewards[agent1_idx : agent2_idx + 1] = 0
-                        episode_lengths[env_idx] = 0
-
-        # After collecting experience, log training stats
-        if fabric.is_global_zero:
-            # Get only non-dummy player rewards (every other index starting at 0)
-            active_indices = torch.arange(0, rewards.shape[1], 2)
-            active_rewards = rewards[:, active_indices]
-            active_logprobs = logprobs[:, active_indices]
-
-            fabric.log_dict(
-                {
-                    "training/mean_returns": active_rewards.mean().item(),
-                    "training/mean_entropy": active_logprobs.mean().item(),
-                    "training/learning_rate": optimizer.param_groups[0]["lr"],
-                    "training/global_step": global_step,
-                },
-                step=global_step,
-            )
-            # Print training stats
-            fabric.print(
-                f"Step {global_step}: "
-                f"Returns={active_rewards.mean().item():.3f}, "
-                f"Entropy={active_logprobs.mean().item():.3f}, "
-                f"LR={optimizer.param_groups[0]['lr']:.2e}"
-            )
-
+        # Calculate returns
         with torch.no_grad(), fabric.device:
             returns = torch.zeros_like(rewards)
             next_value = torch.zeros_like(rewards[0])
-            next_non_terminal = torch.repeat_interleave(1.0 - next_done.float(), 2, dim=0)
+            next_non_terminal = 1.0 - next_done.float().unsqueeze(-1)  # Add agent dimension
 
-            # Calculate returns and advantages
             for t in reversed(range(cfg.n_steps)):
-                # Calculate returns with discounting for terminal states
                 returns[t] = rewards[t] + cfg.gamma * next_value * next_non_terminal
                 next_value = returns[t]
-                # Broadcast dones to match the shape of rewards (2 agents per env)
-                next_non_terminal = torch.repeat_interleave(1.0 - dones[t].float(), 2, dim=0)
+                next_non_terminal = 1.0 - dones[t].float().unsqueeze(-1)  # Add agent dimension
 
-        # Take only data from active player (every other index starting at 0)
-        # active_indices = torch.arange(0, obs.shape[1], 2)
-        # b_obs = obs[:, active_indices].reshape(-1, *obs.shape[2:])
-        # b_actions = actions[:, active_indices].reshape(-1, *actions.shape[2:])
-        # b_logprobs = logprobs[:, active_indices].reshape(-1)
-        # b_returns = returns[:, active_indices].reshape(-1)
-        # b_masks = masks[:, active_indices].reshape(-1, *masks.shape[2:])
+        # Logging with explicit agent dimension
+        total_reward_p1 = rewards[:, :, 0].sum().item()  # First agent
+        total_reward_p2 = rewards[:, :, 1].sum().item()  # Second agent
 
-        # # Store filtered tensors in dictionary for training
-        # training_data = {
-        #     "observations": b_obs,
-        #     "actions": b_actions,
-        #     "logprobs": b_logprobs,
-        #     "returns": b_returns,
-        #     "masks": b_masks,
-        # }
+        # Count the number of finished games (each True in dones is one finished game)
+        finished_games = dones.sum().item()
 
-        # train(fabric, network, optimizer, training_data, global_step, cfg)
+        # Compute mean rewards (guard against division by zero)
+        mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
+        mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
+
+        # Use fabric.print for distributed logging
+        fabric.print(
+            f"Iteration {iteration} stats - "
+            f"Player 1: Total Reward = {total_reward_p1:.2f}, Mean Reward = {mean_reward_p1:.2f}; "
+            f"Player 2: Total Reward = {total_reward_p2:.2f}, Mean Reward = {mean_reward_p2:.2f}; "
+            f"Finished games: {finished_games}"
+        )
+        # -------------------------------------------------
 
         # Use fabric.print instead of print for proper distributed logging
         fabric.print(f"Iteration {iteration} completed")
