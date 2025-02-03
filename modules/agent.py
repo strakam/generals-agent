@@ -22,9 +22,7 @@ def conditional_compile(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if isinstance(
-            self, (NeuroAgent, OnlineAgent, SelfPlayAgent)
-        ) and not isinstance(self, SupervisedAgent):
+        if isinstance(self, (NeuroAgent, OnlineAgent, SelfPlayAgent)) and not isinstance(self, SupervisedAgent):
             return torch.compile(func)(self, *args, **kwargs)
         return func(self, *args, **kwargs)
 
@@ -49,9 +47,7 @@ class NeuroAgent(Agent):
         id: str = "Neuro",
         history_size: Optional[int] = DEFAULT_HISTORY_SIZE,
         batch_size: Optional[int] = DEFAULT_BATCH_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         """
         Initializes the NeuroAgent with the specified parameters.
@@ -228,16 +224,14 @@ class SelfPlayAgent(NeuroAgent):
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         super().__init__(network, id, history_size, batch_size, device)
 
     @conditional_compile
     def act(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            square_logits, direction_logits = self.network(obs, mask)
+            square_logits, direction_logits, logprob, entropy = self.network(obs, mask)
 
         square = torch.argmax(square_logits, dim=1)
         direction = torch.argmax(direction_logits, dim=1)
@@ -247,16 +241,7 @@ class SelfPlayAgent(NeuroAgent):
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         actions[actions[:, 3] == 4, 0] = 1
 
-        # Get log probabilities of selected actions
-        square_logprob = torch.log_softmax(square_logits, dim=1)[
-            torch.arange(square.shape[0]), square
-        ]
-        direction_logprob = torch.log_softmax(direction_logits, dim=1)[
-            torch.arange(direction.shape[0]), direction
-        ]
-        logprob = square_logprob + direction_logprob
-
-        return actions, logprob
+        return actions, logprob, entropy
 
 
 class SupervisedAgent(NeuroAgent):
@@ -281,9 +266,7 @@ class OnlineAgent(NeuroAgent):
         network: L.LightningModule | None = None,
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         super().__init__(network, id, history_size, 1, device)
 
@@ -357,9 +340,7 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
     if mode == "online":
         agent = OnlineAgent(model, id=agent_id, device=device)
     elif mode == "supervised":
-        agent = SupervisedAgent(
-            model, id=agent_id, batch_size=batch_size, device=device
-        )
+        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
     else:  # "base" or default case
         agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
 
