@@ -19,7 +19,7 @@ class SelfPlayConfig:
     n_envs: int = 4
     n_steps: int = 100
     batch_size: int = 64
-    n_epochs: int = 10
+    n_epochs: int = 1
     truncation: int = 1500
     grid_size: int = 8
     checkpoint_path: str = ""  # "step=52000.ckpt"
@@ -217,13 +217,12 @@ class SelfPlayTrainer:
             augmented_obs = torch.stack(augmented_obs, dim=1)
 
             # Process masks.
-            mask = torch.stack(
-                [
-                    torch.from_numpy(infos[agent_name][env_idx][4]).bool()
-                    for env_idx in range(self.cfg.n_envs)
-                    for agent_name in self.agent_names
-                ]
-            ).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
+            mask = [
+                torch.from_numpy(infos[agent_name][env_idx][4]).bool()
+                for env_idx in range(self.cfg.n_envs)
+                for agent_name in self.agent_names
+            ]
+            mask = torch.stack(mask).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4).to(self.fabric.device)
 
             # Process rewards.
             agent_rewards = []
@@ -231,7 +230,7 @@ class SelfPlayTrainer:
                 rewards_agent = torch.tensor([infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)])
                 agent_rewards.append(rewards_agent)
 
-            rewards = torch.stack(agent_rewards, dim=1)
+            rewards = torch.stack(agent_rewards, dim=1).to(self.fabric.device)
 
         return augmented_obs, mask, rewards
 
