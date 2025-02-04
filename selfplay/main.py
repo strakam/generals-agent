@@ -6,11 +6,10 @@ import gymnasium as gym
 import argparse
 import neptune
 from lightning.fabric import Fabric
-import pytorch_lightning as L
-from torch.utils.data import DistributedSampler, RandomSampler, BatchSampler
 
 from generals import GridFactory, GymnasiumGenerals
-from modules.network import load_network
+from generals.core.rewards import FrequentAssetRewardFn
+from modules.network import load_network, Network
 from modules.agent import SelfPlayAgent
 
 
@@ -19,19 +18,19 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 4
-    n_steps: int = 320
-    batch_size: int = 16
-    n_epochs: int = 4
+    n_steps: int = 100
+    batch_size: int = 64
+    n_epochs: int = 10
     truncation: int = 1500
     grid_size: int = 8
-    checkpoint_path: str = "step=52000.ckpt"
+    checkpoint_path: str = "" # "step=52000.ckpt"
 
     # PPO parameters
-    gamma: float = 1.0
-    learning_rate: float = 1e-4
-    max_grad_norm: float = 1.0
-    clip_coef: float = 0.2
-    ent_coef: float = 0.01
+    gamma: float = 1.0  # Discount factor
+    learning_rate: float = 3e-4  # Standard PPO learning rate
+    max_grad_norm: float = 0.5  # Gradient clipping
+    clip_coef: float = 0.2  # PPO clipping coefficient
+    ent_coef: float = 0.01  # Entropy coefficient
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -42,6 +41,7 @@ class SelfPlayConfig:
 
 class NeptuneLogger:
     """Handles logging experiment metrics to Neptune."""
+
     def __init__(self, config: SelfPlayConfig, fabric: Fabric):
         self.fabric = fabric
         # Only initialize Neptune on the main process
@@ -73,6 +73,12 @@ class NeptuneLogger:
                 "ent_coef": self.config.ent_coef,
             }
 
+    def log_metrics(self, metrics: dict):
+        """Logs a batch of metrics to Neptune."""
+        if self.fabric.is_global_zero:
+            for key, value in metrics.items():
+                self.run[f"metrics/{key}"].log(value)
+
     def close(self):
         """Close the Neptune run."""
         if self.fabric.is_global_zero:
@@ -89,6 +95,7 @@ def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.ve
                 grid_factory=grid_factory,
                 truncation=config.truncation,
                 pad_observations_to=24,
+                reward_fn=FrequentAssetRewardFn(),
             )
             for _ in range(config.n_envs)
         ],
@@ -113,8 +120,11 @@ class SelfPlayTrainer:
         # Set up logger.
         self.logger = NeptuneLogger(cfg, self.fabric)
 
-        # Load network, set up optimizer, and configure the agent.
-        self.network = load_network(cfg.checkpoint_path)
+        # Load network or initialize new one, set up optimizer, and configure the agent.
+        if cfg.checkpoint_path != "":
+            self.network = load_network(cfg.checkpoint_path)
+        else:
+            self.network = Network()
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
         self.agent = SelfPlayAgent(network=self.network, batch_size=cfg.n_envs, device=self.fabric.device)
@@ -143,7 +153,13 @@ class SelfPlayTrainer:
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool)
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Processes raw observations from the environment."""
+        """Processes raw observations from the environment.
+           This augments memory of the agent, and obtains masks and rewards from the info dict.
+        Returns:
+            augmented_obs: (n_envs, n_agents, channels, 24, 24)
+            mask: (n_envs, n_agents, 24, 24, 4)
+            rewards: (n_envs, n_agents)
+        """
         with self.fabric.device:
             # Assume obs shape: (n_envs, 2, channels, 24, 24)
             obs_tensor = torch.from_numpy(obs).half()
@@ -166,25 +182,22 @@ class SelfPlayTrainer:
             # Process rewards.
             agent_rewards = []
             for agent_name in self.agent_names:
-                
-                rewards_agent = torch.tensor(
-                    [infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)]
-                )
+                rewards_agent = torch.tensor([infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)])
                 agent_rewards.append(rewards_agent)
+
             rewards = torch.stack(agent_rewards, dim=1)
 
         return augmented_obs, mask, rewards
 
     def run(self):
         """Runs the main training loop."""
-        next_obs, infos = self.envs.reset()
-        next_obs, mask, _ = self.process_observations(next_obs, infos)
-        with self.fabric.device:
-            next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool)
 
         global_step = 0
 
         for iteration in range(1, self.cfg.training_iterations + 1):
+            next_obs, infos = self.envs.reset()
+            next_obs, mask, _ = self.process_observations(next_obs, infos)
+            next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
                 self.obs[step] = next_obs
@@ -198,9 +211,9 @@ class SelfPlayTrainer:
                     player1_actions, player1_logprobs, _ = self.network.get_action(player1_obs, player1_mask)
 
                     # Create dummy actions for the second agent.
-                    dummy_actions = torch.ones_like(player1_actions)
-                    dummy_actions[:, 1:] = 0
                     dummy_logprobs = torch.zeros_like(player1_logprobs)
+                    dummy_actions = torch.zeros_like(player1_actions)
+                    dummy_actions[:, 0] = 1  # pass action
 
                     self.actions[step, :, 0] = player1_actions
                     self.actions[step, :, 1] = dummy_actions
@@ -213,16 +226,16 @@ class SelfPlayTrainer:
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
                 self.rewards[step] = step_rewards
 
-                next_done = np.logical_or(terminations, truncations)
-                with self.fabric.device:
-                    next_done = torch.tensor(next_done, dtype=torch.bool)
-
-                if torch.any(step_rewards == 1):
-                    self.fabric.print(f"Step {step} rewards with 1: {step_rewards}")
-                    self.fabric.print(f"Next done: {next_done}")
+                dones = np.logical_or(terminations, truncations)
+                next_done = torch.tensor(dones, device=self.fabric.device)
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
+                # Verify rewards are exactly ±1 or 0
+                # assert torch.all(
+                #     (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
+                # ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
+
                 returns = torch.zeros_like(self.rewards)
                 next_value = torch.zeros_like(self.rewards[0])
                 next_non_terminal = 1.0 - next_done.float().unsqueeze(-1)
@@ -234,8 +247,11 @@ class SelfPlayTrainer:
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()
             finished_games = self.dones.sum().item()
-            mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
-            mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
+            # mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
+            # mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
+            mean_reward_p1 = total_reward_p1 / self.cfg.n_envs
+            mean_reward_p2 = total_reward_p2 / self.cfg.n_envs
+
 
             self.fabric.print(
                 f"Iteration {iteration} stats - "
@@ -244,6 +260,16 @@ class SelfPlayTrainer:
                 f"Finished games: {finished_games}"
             )
             self.fabric.print(f"Iteration {iteration} completed")
+
+            self.logger.log_metrics(
+                {
+                    "total_reward_p1": total_reward_p1,
+                    "mean_reward_p1": mean_reward_p1,
+                    "total_reward_p2": total_reward_p2,
+                    "mean_reward_p2": mean_reward_p2,
+                    "finished_games": finished_games,
+                }
+            )
 
         self.logger.close()
 

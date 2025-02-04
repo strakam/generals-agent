@@ -92,7 +92,7 @@ class Network(L.LightningModule):
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
         return square_logits, direction
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch):
         obs, mask, actions = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
@@ -112,9 +112,11 @@ class Network(L.LightningModule):
     def get_action(self, obs, mask, action=None):
         mask = mask.float()
         obs = self.normalize_observations(obs.float())
-        input = self.backbone(obs)
         square_mask, direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(input)
+
+        representation = self.backbone(obs)
+        
+        square_logits = self.square_head(representation)
         square_logits = (square_logits + square_mask).flatten(1)
 
         # Sample square from categorical distribution
@@ -127,7 +129,7 @@ class Network(L.LightningModule):
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((input, square_reshaped), dim=1)
+        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
 
@@ -165,8 +167,7 @@ class Network(L.LightningModule):
         logprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self.get_action(obs, masks, actions)
-        logratio = newlogprobs - logprobs
-        ratio = logratio.exp()
+        ratio = (newlogprobs - logprobs).exp()
 
         pg_loss1 = -returns * ratio
         pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
