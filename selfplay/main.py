@@ -16,10 +16,10 @@ from network import load_network, Network
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 4
+    n_envs: int = 256
     n_steps: int = 100
-    batch_size: int = 64
-    n_epochs: int = 1
+    batch_size: int = 256
+    n_epochs: int = 3
     truncation: int = 1500
     grid_size: int = 8
     checkpoint_path: str = ""  # "step=52000.ckpt"
