@@ -22,7 +22,9 @@ def conditional_compile(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if isinstance(self, (NeuroAgent, OnlineAgent, SelfPlayAgent)) and not isinstance(self, SupervisedAgent):
+        if isinstance(
+            self, (NeuroAgent, OnlineAgent, SelfPlayAgent)
+        ) and not isinstance(self, SupervisedAgent):
             return torch.compile(func)(self, *args, **kwargs)
         return func(self, *args, **kwargs)
 
@@ -38,7 +40,7 @@ class NeuroAgent(Agent):
         id (str): Identifier for the agent.
         history_size (Optional[int]): Number of past states to consider.
         batch_size (Optional[int]): Batch size for processing.
-        fabric: Lightning Fabric instance for device management.
+        device (torch.device): Device to run the computations on.
     """
 
     def __init__(
@@ -47,7 +49,9 @@ class NeuroAgent(Agent):
         id: str = "Neuro",
         history_size: Optional[int] = DEFAULT_HISTORY_SIZE,
         batch_size: Optional[int] = DEFAULT_BATCH_SIZE,
-        fabric=None,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
         """
         Initializes the NeuroAgent with the specified parameters.
@@ -57,14 +61,17 @@ class NeuroAgent(Agent):
             id (str): Identifier for the agent.
             history_size (Optional[int]): Number of past states to consider.
             batch_size (Optional[int]): Batch size for processing.
-            fabric: Lightning Fabric instance for device management.
+            device (torch.device): Device to run the computations on.
         """
         super().__init__(id)
         self.network = network
         self.history_size = history_size
         self.batch_size = batch_size
         self.n_channels = 21 + 2 * self.history_size
-        self.fabric = fabric
+        self.device = device
+
+        if self.network is not None:
+            self.network.to(device)
 
         self.reset()
 
@@ -77,17 +84,19 @@ class NeuroAgent(Agent):
         shape = (self.batch_size, 24, 24)
         history_shape = (self.batch_size, self.history_size, 24, 24)
 
-        with self.fabric.device:
-            self.army_stack = torch.zeros(history_shape, dtype=torch.float16)
-            self.enemy_stack = torch.zeros(history_shape, dtype=torch.float16)
-            self.last_army = torch.zeros(shape, dtype=torch.float16)
-            self.last_enemy_army = torch.zeros(shape, dtype=torch.float16)
-            self.cities = torch.zeros(shape).bool()
-            self.generals = torch.zeros(shape).bool()
-            self.mountains = torch.zeros(shape).bool()
-            self.seen = torch.zeros(shape).bool()
-            self.enemy_seen = torch.zeros(shape).bool()
-            self.last_observation = torch.zeros((self.batch_size, self.n_channels, 24, 24), dtype=torch.float16)
+        device = self.device
+        self.army_stack = torch.zeros(history_shape, device=device)
+        self.enemy_stack = torch.zeros(history_shape, device=device)
+        self.last_army = torch.zeros(shape, device=device)
+        self.last_enemy_army = torch.zeros(shape, device=device)
+        self.cities = torch.zeros(shape, device=device).bool()
+        self.generals = torch.zeros(shape, device=device).bool()
+        self.mountains = torch.zeros(shape, device=device).bool()
+        self.seen = torch.zeros(shape, device=device).bool()
+        self.enemy_seen = torch.zeros(shape, device=device).bool()
+        self.last_observation = torch.zeros(
+            (self.batch_size, self.n_channels, 24, 24), device=device
+        )
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -114,78 +123,84 @@ class NeuroAgent(Agent):
         Here the agent augments what it knows about the game with the new observation.
         This is then further used to make a decision.
         """
-        with self.fabric.device:
-            armies = 0
-            generals = 1
-            cities = 2
-            mountains = 3
-            neutral_cells = 4
-            owned_cells = 5
-            opponent_cells = 6
-            fog_cells = 7
-            structures_in_fog = 8
-            owned_land_count = 9
-            owned_army_count = 10
-            opponent_land_count = 11
-            opponent_army_count = 12
-            timestep = 13
-            priority = 14
+        armies = 0
+        generals = 1
+        cities = 2
+        mountains = 3
+        neutral_cells = 4
+        owned_cells = 5
+        opponent_cells = 6
+        fog_cells = 7
+        structures_in_fog = 8
+        owned_land_count = 9
+        owned_army_count = 10
+        opponent_land_count = 11
+        opponent_army_count = 12
+        timestep = 13
+        priority = 14
 
-            self.reset_histories(obs)
+        self.reset_histories(obs)
 
-            # Calculate current army states
-            current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
-            current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
+        # Calculate current army states
+        current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
+        current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
-            # Update history stacks by shifting and adding new differences
-            self.army_stack = torch.roll(self.army_stack, shifts=1, dims=1)
-            self.enemy_stack = torch.roll(self.enemy_stack, shifts=1, dims=1)
+        # Update history stacks by shifting and adding new differences
+        self.army_stack = torch.roll(self.army_stack, shifts=1, dims=1)
+        self.enemy_stack = torch.roll(self.enemy_stack, shifts=1, dims=1)
 
-            self.army_stack[:, 0, :, :] = current_army - self.last_army
-            self.enemy_stack[:, 0, :, :] = current_enemy_army - self.last_enemy_army
+        self.army_stack[:, 0, :, :] = current_army - self.last_army
+        self.enemy_stack[:, 0, :, :] = current_enemy_army - self.last_enemy_army
 
-            # Store current states for next iteration
-            self.last_army = current_army
-            self.last_enemy_army = current_enemy_army
+        # Store current states for next iteration
+        self.last_army = current_army
+        self.last_enemy_army = current_enemy_army
 
-            self.seen |= max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool()
-            self.enemy_seen |= max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool()
+        self.seen = torch.logical_or(
+            self.seen,
+            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
+        )
 
-            self.cities |= obs[:, cities, :, :].bool()
-            self.generals |= obs[:, generals, :, :].bool()
-            self.mountains |= obs[:, mountains, :, :].bool()
+        self.enemy_seen = torch.logical_or(
+            self.enemy_seen,
+            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
+        )
 
-            ones = torch.ones((self.batch_size, 24, 24), dtype=torch.float16)
-            channels = torch.stack(
-                [
-                    obs[:, armies, :, :],
-                    obs[:, armies, :, :] * obs[:, owned_cells, :, :],
-                    obs[:, armies, :, :] * obs[:, opponent_cells, :, :],
-                    obs[:, armies, :, :] * obs[:, neutral_cells, :, :],
-                    self.seen,
-                    self.enemy_seen,  # enemy sight
-                    self.generals,
-                    self.cities,
-                    self.mountains,
-                    obs[:, neutral_cells, :, :],
-                    obs[:, owned_cells, :, :],
-                    obs[:, opponent_cells, :, :],
-                    obs[:, fog_cells, :, :],
-                    obs[:, structures_in_fog, :, :],
-                    obs[:, timestep, :, :] * ones,
-                    (obs[:, timestep, :, :] % 50) * ones / 50,
-                    obs[:, priority, :, :] * ones,
-                    obs[:, owned_land_count, :, :] * ones,
-                    obs[:, owned_army_count, :, :] * ones,
-                    obs[:, opponent_land_count, :, :] * ones,
-                    obs[:, opponent_army_count, :, :] * ones,
-                ],
-                dim=1,
-            )
-            army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
-            augmented_obs = torch.cat([channels, army_stacks], dim=1).half()
-            self.last_observation = augmented_obs
-            return augmented_obs
+        self.cities |= obs[:, cities, :, :].bool()
+        self.generals |= obs[:, generals, :, :].bool()
+        self.mountains |= obs[:, mountains, :, :].bool()
+
+        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        channels = torch.stack(
+            [
+                obs[:, armies, :, :],
+                obs[:, armies, :, :] * obs[:, owned_cells, :, :],
+                obs[:, armies, :, :] * obs[:, opponent_cells, :, :],
+                obs[:, armies, :, :] * obs[:, neutral_cells, :, :],
+                self.seen,
+                self.enemy_seen,  # enemy sight
+                self.generals,
+                self.cities,
+                self.mountains,
+                obs[:, neutral_cells, :, :],
+                obs[:, owned_cells, :, :],
+                obs[:, opponent_cells, :, :],
+                obs[:, fog_cells, :, :],
+                obs[:, structures_in_fog, :, :],
+                obs[:, timestep, :, :] * ones,
+                (obs[:, timestep, :, :] % 50) * ones / 50,
+                obs[:, priority, :, :] * ones,
+                obs[:, owned_land_count, :, :] * ones,
+                obs[:, owned_army_count, :, :] * ones,
+                obs[:, opponent_land_count, :, :] * ones,
+                obs[:, opponent_army_count, :, :] * ones,
+            ],
+            dim=1,
+        )
+        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
+        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
+        self.last_observation = augmented_obs
+        return augmented_obs
 
     @conditional_compile
     def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
@@ -193,11 +208,11 @@ class NeuroAgent(Agent):
         Based on a new observation, augment the internal state and return an action.
         """
         if isinstance(obs, np.ndarray):
-            obs = torch.from_numpy(obs).half().to(self.fabric.device)
+            obs = torch.from_numpy(obs).float().to(self.device)
 
-        obs = obs.half().to(self.fabric.device)
+        obs = obs.float().to(self.device)
         self.augment_observation(obs)
-        mask = torch.from_numpy(mask).bool().to(self.fabric.device)
+        mask = torch.from_numpy(mask).float().to(self.device)
 
         with torch.no_grad():
             square, direction = self.network(self.last_observation, mask)
@@ -206,7 +221,7 @@ class NeuroAgent(Agent):
         direction = torch.argmax(direction, dim=1)
         row = square // GRID_SIZE
         col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size, device=self.fabric.device, dtype=torch.float16)
+        zeros = torch.zeros(self.batch_size).to(self.device)
         actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
         # actions, where direction is 4, set the first value to 1
         actions[actions[:, 3] == 4, 0] = 1
@@ -220,25 +235,35 @@ class SelfPlayAgent(NeuroAgent):
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        fabric=None,
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
-        super().__init__(network, id, history_size, batch_size, fabric)
+        super().__init__(network, id, history_size, batch_size, device)
 
     @conditional_compile
     def act(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        with self.fabric.device:
-            with torch.no_grad():
-                square_logits, direction_logits, logprob, entropy = self.network(obs, mask)
+        with torch.no_grad():
+            square_logits, direction_logits = self.network(obs, mask)
 
-            square = torch.argmax(square_logits, dim=1)
-            direction = torch.argmax(direction_logits, dim=1)
-            row = square // GRID_SIZE
-            col = square % GRID_SIZE
-            zeros = torch.zeros(self.batch_size)
-            actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
-            actions[actions[:, 3] == 4, 0] = 1
+        square = torch.argmax(square_logits, dim=1)
+        direction = torch.argmax(direction_logits, dim=1)
+        row = square // GRID_SIZE
+        col = square % GRID_SIZE
+        zeros = torch.zeros(self.batch_size).to(self.device)
+        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        actions[actions[:, 3] == 4, 0] = 1
 
-            return actions, logprob, entropy
+        # Get log probabilities of selected actions
+        square_logprob = torch.log_softmax(square_logits, dim=1)[
+            torch.arange(square.shape[0]), square
+        ]
+        direction_logprob = torch.log_softmax(direction_logits, dim=1)[
+            torch.arange(direction.shape[0]), direction
+        ]
+        logprob = square_logprob + direction_logprob
+
+        return actions, logprob
 
 
 class SupervisedAgent(NeuroAgent):
@@ -247,9 +272,9 @@ class SupervisedAgent(NeuroAgent):
         network: L.LightningModule | None = None,
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
-        fabric: torch.device = "cpu",
+        device: torch.device = "cpu",
     ):
-        super().__init__(network, id, history_size, 1, fabric)
+        super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
@@ -263,9 +288,11 @@ class OnlineAgent(NeuroAgent):
         network: L.LightningModule | None = None,
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
-        fabric: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        ),
     ):
-        super().__init__(network, id, history_size, 1, fabric)
+        super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
         """
@@ -335,10 +362,12 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
     agent_id = path.split("/")[-1].split(".")[0]
 
     if mode == "online":
-        agent = OnlineAgent(model, id=agent_id, fabric=device)
+        agent = OnlineAgent(model, id=agent_id, device=device)
     elif mode == "supervised":
-        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, fabric=device)
+        agent = SupervisedAgent(
+            model, id=agent_id, batch_size=batch_size, device=device
+        )
     else:  # "base" or default case
-        agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, fabric=device)
+        agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
 
     return agent

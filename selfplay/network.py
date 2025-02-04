@@ -21,6 +21,15 @@ class Network(L.LightningModule):
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
+        self.value_head = nn.Sequential(
+            Pyramid(final_channels, [], []),
+            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(h * w, 1),
+            Lambda(lambda x: 2.0 * torch.tanh(x)),  # Scale up tanh
+        )
+
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
             nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
@@ -34,9 +43,11 @@ class Network(L.LightningModule):
         self.square_loss = nn.CrossEntropyLoss()
         weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 20])
         self.direction_loss = nn.CrossEntropyLoss(weight=weights)
+        self.value_loss = nn.MSELoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone)
+            self.value_head = torch.compile(self.value_head)
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
@@ -70,10 +81,9 @@ class Network(L.LightningModule):
         return square_mask, direction_mask
 
     def forward(self, obs, mask, teacher_cells=None):
-        obs = obs.float()
-        mask = mask.float()
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
+        # value = self.value_head(x)
 
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
@@ -92,121 +102,43 @@ class Network(L.LightningModule):
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
         return square_logits, direction
 
-    def training_step(self, batch):
-        obs, mask, actions = batch
+    def training_step(self, batch, batch_idx):
+        obs, mask, values, actions = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
 
-        square, direction, _, _ = self(obs, mask, target_cell)
+        square, direction = self(obs, mask, target_cell)
 
         square_loss = self.square_loss(square, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
+        # value_loss = self.value_loss(value.flatten(), values)
 
         loss = square_loss + direction_loss
+        # loss
+        # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
         self.log("loss", loss, on_step=True, prog_bar=True)
         return loss
 
-    def get_action(self, obs, mask, action=None):
-        mask = mask.float()
-        obs = self.normalize_observations(obs.float())
-        square_mask, direction_mask = self.prepare_masks(obs, mask)
-
-        representation = self.backbone(obs)
-        
-        square_logits = self.square_head(representation)
-        square_logits = (square_logits + square_mask).flatten(1)
-
-        # Sample square from categorical distribution
-        square_probs = F.softmax(square_logits, dim=1)
-        square_dist = torch.distributions.Categorical(square_probs)
-        if action is None:
-            square = square_dist.sample()
-        else:
-            square = action[:, 1] * 24 + action[:, 2]
-
-        # Get direction logits based on sampled square
-        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
-        direction = direction + direction_mask
-
-        i, j = square // 24, square % 24
-        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
-
-        # Sample direction
-        direction_probs = F.softmax(direction, dim=1)
-        direction_dist = torch.distributions.Categorical(direction_probs)
-        if action is None:
-            direction = direction_dist.sample()
-        else:
-            direction = action[:, 3]
-
-        # Calculate log probabilities
-        square_logprob = square_dist.log_prob(square)
-        direction_logprob = direction_dist.log_prob(direction)
-        logprob = square_logprob + direction_logprob
-        entropy = square_dist.entropy() + direction_dist.entropy()
-
-        # Create action tensor with shape [batch_size, 5]
-        zeros = torch.zeros_like(square, dtype=torch.float)
-        row = square // 24
-        col = square % 24
-        action = torch.stack([zeros, row, col, direction, zeros], dim=1)
-        action[action[:, 3] == 4, 0] = 1  # pass action
-
-        return action, logprob, entropy
-
-    def ppo_loss(self, batch, args):
-        obs = batch["observations"]
-        masks = batch["masks"]
-        actions = batch["actions"]
-        returns = batch["returns"]
-        logprobs = batch["logprobs"]
-
-        _, newlogprobs, entropy = self.get_action(obs, masks, actions)
-        ratio = (newlogprobs - logprobs).exp()
-
-        pg_loss1 = -returns * ratio
-        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-        entropy_loss = entropy.mean()
-        loss = pg_loss - args.ent_coef * entropy_loss
-
-        # Log PPO-specific metrics
-        with torch.no_grad():
-            # Log policy metrics
-            self.log("ppo/policy_loss", pg_loss, on_step=True)
-            self.log("ppo/entropy", entropy_loss, on_step=True)
-            self.log("ppo/total_loss", loss, on_step=True)
-
-            # Log policy statistics
-            self.log("ppo/mean_ratio", ratio.mean(), on_step=True)
-            self.log("ppo/max_ratio", ratio.max(), on_step=True)
-            self.log("ppo/min_ratio", ratio.min(), on_step=True)
-
-            # Log value statistics
-            self.log("ppo/mean_returns", returns.mean(), on_step=True)
-            self.log("ppo/max_returns", returns.max(), on_step=True)
-            self.log("ppo/min_returns", returns.min(), on_step=True)
-
-        return loss
-
-    def configure_optimizers(self, lr: float = None, n_steps: int = None):
-        lr = lr or self.lr
-        n_steps = n_steps or self.n_steps
-
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
-        return optimizer, scheduler
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.n_steps, eta_min=1e-5)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "name": "learning_rate",
+            },
+        }
 
     def on_after_backward(self):
         # Track gradients for high-level modules: backbone, value_head, square_head, direction_head
         high_level_modules = {
             "backbone": self.backbone,
+            "value_head": self.value_head,
             "square_head": self.square_head,
             "direction_head": self.direction_head,
         }

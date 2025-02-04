@@ -7,8 +7,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 
 from dataloader import ReplayDataset, per_worker_init_fn, collate_fn
-from modules.network import Network
-from modules.agent import load_agent
+from network import Network
 
 
 @dataclass
@@ -22,7 +21,7 @@ class TrainingConfig:
     batch_size: int = 2048
     n_workers: int = 32
     # Training parameters
-    learning_rate: float = 5e-5
+    learning_rate: float = 2e-4
     n_epochs: int = 16
     clip_val: float = 2.0
     seed: int = 42
@@ -32,7 +31,7 @@ class TrainingConfig:
     checkpoint_every_n_steps: int = 5000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/sup_checkpoints/"
     neptune_token_path: str = "neptune_token.txt"
-    model_ckpt: str = "step=52000.ckpt"
+    model_ckpt: str = None
 
     def __post_init__(self):
         """Calculate dependent parameters after initialization."""

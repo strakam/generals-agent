@@ -8,9 +8,9 @@ import neptune
 from lightning.fabric import Fabric
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import FrequentAssetRewardFn
-from modules.network import load_network, Network
-from modules.agent import SelfPlayAgent
+from generals.core.rewards import LandRewardFn
+from supervised.network import load_network, Network
+from supervised.agent import SelfPlayAgent
 
 
 @dataclass
@@ -23,7 +23,7 @@ class SelfPlayConfig:
     n_epochs: int = 10
     truncation: int = 1500
     grid_size: int = 8
-    checkpoint_path: str = "" # "step=52000.ckpt"
+    checkpoint_path: str = ""  # "step=52000.ckpt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -95,7 +95,7 @@ def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.ve
                 grid_factory=grid_factory,
                 truncation=config.truncation,
                 pad_observations_to=24,
-                reward_fn=FrequentAssetRewardFn(),
+                reward_fn=LandRewardFn(),
             )
             for _ in range(config.n_envs)
         ],
@@ -162,7 +162,7 @@ class SelfPlayTrainer:
         """
         with self.fabric.device:
             # Assume obs shape: (n_envs, 2, channels, 24, 24)
-            obs_tensor = torch.from_numpy(obs).half()
+            obs_tensor = torch.from_numpy(obs).half().to(self.fabric.device)
             augmented_obs = []
             for agent_idx in range(self.n_agents):
                 agent_obs = obs_tensor[:, agent_idx, ...]
@@ -251,7 +251,6 @@ class SelfPlayTrainer:
             # mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
             mean_reward_p1 = total_reward_p1 / self.cfg.n_envs
             mean_reward_p2 = total_reward_p2 / self.cfg.n_envs
-
 
             self.fabric.print(
                 f"Iteration {iteration} stats - "

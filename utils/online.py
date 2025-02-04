@@ -2,7 +2,7 @@ import time
 import numpy as np
 import argparse
 from generals.remote import GeneralsIOClient
-from modules.agent import OnlineAgent, load_agent
+from supervised.agent import OnlineAgent, load_agent
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -43,7 +43,7 @@ def load_online_agent(checkpoint_path: str) -> OnlineAgent:
 def main():
     args = parse_arguments()
 
-    checkpoint_path = "checkpoints/sup280/step=80000.ckpt"
+    checkpoint_path = "checkpoints/sup114/step=52000.ckpt"
     agent = load_online_agent(checkpoint_path)
 
     with GeneralsIOClient(agent, args.user_id, args.public) as client:
