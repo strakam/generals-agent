@@ -69,19 +69,20 @@ class Network(L.LightningModule):
         """
         shape = (self.batch_size, 24, 24)
         history_shape = (self.batch_size, self.history_size, 24, 24)
+        device = self.device  # or use: device = next(self.parameters()).device
 
-        device = self.device
-        self.army_stack = torch.zeros(history_shape, device=device)
-        self.enemy_stack = torch.zeros(history_shape, device=device)
-        self.last_army = torch.zeros(shape, device=device)
-        self.last_enemy_army = torch.zeros(shape, device=device)
-        self.cities = torch.zeros(shape, device=device).bool()
-        self.generals = torch.zeros(shape, device=device).bool()
-        self.mountains = torch.zeros(shape, device=device).bool()
-        self.seen = torch.zeros(shape, device=device).bool()
-        self.enemy_seen = torch.zeros(shape, device=device).bool()
-        self.last_observation = torch.zeros(
-            (self.batch_size, self.n_channels, 24, 24), device=device
+        self.register_buffer("army_stack", torch.zeros(history_shape, device=device))
+        self.register_buffer("enemy_stack", torch.zeros(history_shape, device=device))
+        self.register_buffer("last_army", torch.zeros(shape, device=device))
+        self.register_buffer("last_enemy_army", torch.zeros(shape, device=device))
+        self.register_buffer("cities", torch.zeros(shape, device=device).bool())
+        self.register_buffer("generals", torch.zeros(shape, device=device).bool())
+        self.register_buffer("mountains", torch.zeros(shape, device=device).bool())
+        self.register_buffer("seen", torch.zeros(shape, device=device).bool())
+        self.register_buffer("enemy_seen", torch.zeros(shape, device=device).bool())
+        self.register_buffer(
+            "last_observation",
+            torch.zeros((self.batch_size, self.n_channels, 24, 24), device=device),
         )
 
     def reset_histories(self, obs: torch.Tensor):
@@ -239,8 +240,6 @@ class Network(L.LightningModule):
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
-        print(direction.shape)
-        print(direction_mask.shape)
         direction = direction + direction_mask
 
         i, j = square // 24, square % 24
