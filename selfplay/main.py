@@ -127,6 +127,8 @@ class SelfPlayTrainer:
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
 
+        self.network.reset()
+
         # Create environment.
         agent_names = ["1", "2"]
         self.envs = create_environment(agent_names, cfg)
@@ -149,6 +151,52 @@ class SelfPlayTrainer:
             self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float16)
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool)
+
+    def train(self, fabric: Fabric, data: dict):
+        """Train the network using PPO on collected rollout data."""
+        # Get actual data size
+        total_size = data["observations"].shape[0]
+        indices = torch.arange(total_size)
+
+        effective_batch_size = min(self.cfg.batch_size, total_size)
+
+        # Choose sampler based on distributed setting
+        if fabric.world_size > 1:
+            sampler = torch.utils.data.DistributedSampler(
+                indices,
+                num_replicas=fabric.world_size,
+                rank=fabric.global_rank,
+                shuffle=True,
+                seed=self.cfg.seed,
+            )
+        else:
+            sampler = torch.utils.data.RandomSampler(indices)
+
+        batch_sampler = torch.utils.data.BatchSampler(
+            sampler,
+            batch_size=effective_batch_size,
+            drop_last=False,
+        )
+
+        self.network.train()
+        for epoch in range(self.cfg.n_epochs):
+            # Set epoch for distributed sampler
+            if fabric.world_size > 1:
+                sampler.set_epoch(epoch)
+
+            for batch_indices in batch_sampler:
+                # Convert indices list to tensor for indexing
+                batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
+                # Index the data using tensor indexing
+                batch = {k: v[batch_indices_tensor] for k, v in data.items()}
+                loss = self.network.ppo_loss(batch, self.cfg)
+
+                self.optimizer.zero_grad(set_to_none=True)
+                fabric.backward(loss)
+                fabric.clip_gradients(self.network, self.optimizer, max_norm=self.cfg.max_grad_norm)
+                self.optimizer.step()
+                # print loss
+                fabric.print(f"Loss: {loss.item()}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
@@ -241,6 +289,23 @@ class SelfPlayTrainer:
                     returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
                     next_value = returns[t]
                     next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
+
+            # Flatten and prepare dataset for training
+            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
+            b_actions = self.actions[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1)
+            b_returns = returns[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1)
+            b_logprobs = self.logprobs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs)
+            b_masks = self.masks[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, 24, 24, 4)
+
+            dataset = {
+                "observations": b_obs,
+                "actions": b_actions,
+                "returns": b_returns,
+                "logprobs": b_logprobs,
+                "masks": b_masks,
+            }
+
+            self.train(self.fabric, dataset)
 
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()
