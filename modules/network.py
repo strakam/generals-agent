@@ -112,9 +112,9 @@ class Network(L.LightningModule):
     def get_action(self, obs, mask, action=None):
         mask = mask.float()
         obs = self.normalize_observations(obs.float())
-        x = self.backbone(obs)
+        input = self.backbone(obs)
         square_mask, direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(x)
+        square_logits = self.square_head(input)
         square_logits = (square_logits + square_mask).flatten(1)
 
         # Sample square from categorical distribution
@@ -127,12 +127,12 @@ class Network(L.LightningModule):
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        representation_with_square = torch.cat((input, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
 
         i, j = square // 24, square % 24
-        direction = direction[torch.arange(direction.shape[0], dtype=torch.long), :, i.long(), j.long()]
+        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
         # Sample direction
         direction_probs = F.softmax(direction, dim=1)
@@ -153,8 +153,8 @@ class Network(L.LightningModule):
         row = square // 24
         col = square % 24
         action = torch.stack([zeros, row, col, direction, zeros], dim=1)
-        # For direction 4 (pass), set first value to 1
-        action[action[:, 3] == 4, 0] = 1
+        action[action[:, 3] == 4, 0] = 1  # pass action
+
         return action, logprob, entropy
 
     def ppo_loss(self, batch, args):

@@ -2,15 +2,16 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from typing import List, Tuple
-from generals import GridFactory, GymnasiumGenerals
 import gymnasium as gym
 import argparse
-from modules.network import load_network
-from modules.agent import SelfPlayAgent
 import neptune
 from lightning.fabric import Fabric
 import pytorch_lightning as L
 from torch.utils.data import DistributedSampler, RandomSampler, BatchSampler
+
+from generals import GridFactory, GymnasiumGenerals
+from modules.network import load_network
+from modules.agent import SelfPlayAgent
 
 
 @dataclass
@@ -41,9 +42,7 @@ class SelfPlayConfig:
 
 class NeptuneLogger:
     """Handles logging experiment metrics to Neptune."""
-
     def __init__(self, config: SelfPlayConfig, fabric: Fabric):
-        # Add fabric parameter
         self.fabric = fabric
         # Only initialize Neptune on the main process
         if self.fabric.is_global_zero:
@@ -67,6 +66,11 @@ class NeptuneLogger:
                 "strategy": self.config.strategy,
                 "accelerator": self.config.accelerator,
                 "devices": self.config.devices,
+                "gamma": self.config.gamma,
+                "learning_rate": self.config.learning_rate,
+                "max_grad_norm": self.config.max_grad_norm,
+                "clip_coef": self.config.clip_coef,
+                "ent_coef": self.config.ent_coef,
             }
 
     def close(self):
@@ -76,12 +80,8 @@ class NeptuneLogger:
 
 
 def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    # Generate grid factory as in real generals.io
-    min_grid_dims = (config.grid_size, config.grid_size)
-    max_grid_dims = (config.grid_size, config.grid_size)
-    # TODO: here we should use the generalsio grid factory when legit training
-    # grid_factory = GridFactory(mode="generalsio", min_grid_dims=min_grid_dims, max_grid_dims=max_grid_dims)
-    grid_factory = GridFactory(min_grid_dims=min_grid_dims, max_grid_dims=max_grid_dims)
+    dims = (config.grid_size, config.grid_size)
+    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims)
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -95,220 +95,163 @@ def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.ve
     )
 
 
-def train(
-    fabric: Fabric,
-    network: L.LightningModule,
-    optimizer: torch.optim.Optimizer,
-    data: dict[str, torch.Tensor],
-    global_step: int,
-    cfg: SelfPlayConfig,
-):
-    # Get actual data size
-    total_size = data["observations"].shape[0]
-    indices = torch.arange(total_size)
+class SelfPlayTrainer:
+    """Encapsulates setup and training loop for self-play."""
 
-    effective_batch_size = min(cfg.batch_size, total_size)
+    def __init__(self, cfg: SelfPlayConfig):
+        self.cfg = cfg
 
-    # Choose sampler based on distributed setting
-    if fabric.world_size > 1:
-        sampler = DistributedSampler(
-            indices,
-            num_replicas=fabric.world_size,
-            rank=fabric.global_rank,
-            shuffle=True,
-            seed=cfg.seed,
+        # Initialize Fabric and seed the experiment.
+        self.fabric = Fabric(
+            accelerator=cfg.accelerator,
+            devices=cfg.devices,
+            strategy=cfg.strategy,
         )
-    else:
-        sampler = RandomSampler(indices)
+        self.fabric.launch()
+        self.fabric.seed_everything(cfg.seed)
 
-    batch_sampler = BatchSampler(
-        sampler,
-        batch_size=effective_batch_size,
-        drop_last=False,
-    )
+        # Set up logger.
+        self.logger = NeptuneLogger(cfg, self.fabric)
 
-    network.train()
-    for epoch in range(cfg.n_epochs):
-        # Set epoch for distributed sampler
-        if fabric.world_size > 1:
-            sampler.set_epoch(epoch)
+        # Load network, set up optimizer, and configure the agent.
+        self.network = load_network(cfg.checkpoint_path)
+        self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
+        self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
+        self.agent = SelfPlayAgent(network=self.network, batch_size=cfg.n_envs, device=self.fabric.device)
 
-        for batch_indices in batch_sampler:
-            # Convert indices list to tensor for indexing
-            batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
-            # Index the data using tensor indexing
-            batch = {k: v[batch_indices_tensor] for k, v in data.items()}
-            loss = network.ppo_loss(batch, cfg)
+        # Create environment.
+        agent_names = ["1", "2"]
+        self.envs = create_environment(agent_names, cfg)
+        self.agent_names = agent_names
 
-            optimizer.zero_grad(set_to_none=True)
-            fabric.backward(loss)
-            fabric.clip_gradients(network, optimizer, max_norm=cfg.max_grad_norm)
-            optimizer.step()
-            # print loss
-            fabric.print(f"Loss: {loss.item()}")
+        # Setup expected tensor shapes for rollouts.
+        self.n_agents = 2
+        self.n_channels = self.agent.n_channels
+        self.obs_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, self.n_channels, 24, 24)
+        self.masks_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 24, 24, 4)
+        self.actions_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 5)
+        self.logprobs_shape = (cfg.n_steps, cfg.n_envs, self.n_agents)
+        self.rewards_shape = (cfg.n_steps, cfg.n_envs, self.n_agents)
+        self.dones_shape = (cfg.n_steps, cfg.n_envs)
 
-        # network.on_train_epoch_end(global_step)
+        with self.fabric.device:
+            self.obs = torch.zeros(self.obs_shape, dtype=torch.float16)
+            self.actions = torch.zeros(self.actions_shape, dtype=torch.float16)
+            self.logprobs = torch.zeros(self.logprobs_shape)
+            self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float16)
+            self.dones = torch.zeros(self.dones_shape, dtype=torch.bool)
+            self.masks = torch.zeros(self.masks_shape, dtype=torch.bool)
 
-
-def main(args):
-    # Initialize hyperparameters
-    cfg = SelfPlayConfig()
-
-    # Initialize Fabric - removed DDPStrategy since we're using "auto"
-    fabric = Fabric(
-        accelerator=cfg.accelerator,
-        devices=cfg.devices,
-        strategy=cfg.strategy,
-    )
-    fabric.launch()
-
-    fabric.seed_everything(cfg.seed)
-
-    # Initialize logger after fabric launch
-    logger = NeptuneLogger(cfg, fabric)
-
-    # Load agent
-    n_obs = cfg.n_envs
-    network = load_network(cfg.checkpoint_path)
-    optimizer, _ = network.configure_optimizers(lr=cfg.learning_rate)
-    # Setup the network with Fabric
-    network, optimizer = fabric.setup(network, optimizer)
-    agent = SelfPlayAgent(network=network, batch_size=n_obs, device=fabric.device)
-
-    # Setup environment
-    agent_names = ["1", "2"]
-    envs = create_environment(agent_names, cfg)
-
-    n_channels = agent.n_channels
-
-    # Update tensor shapes to have explicit agent dimension
-    n_agents = 2
-    obs_shape = (cfg.n_steps, cfg.n_envs, n_agents, n_channels, 24, 24)
-    masks_shape = (cfg.n_steps, cfg.n_envs, n_agents, 24, 24, 4)
-    actions_shape = (cfg.n_steps, cfg.n_envs, n_agents, 5)
-    logprobs_shape = (cfg.n_steps, cfg.n_envs, n_agents)
-    rewards_shape = (cfg.n_steps, cfg.n_envs, n_agents)
-    dones_shape = (cfg.n_steps, cfg.n_envs)  # Keeps same shape as it's per-environment
-
-    # Initialize tensors using fabric's device context
-    with fabric.device:
-        obs = torch.zeros(obs_shape, dtype=torch.float16)
-        actions = torch.zeros(actions_shape, dtype=torch.float16)
-        logprobs = torch.zeros(logprobs_shape)
-        rewards = torch.zeros(rewards_shape, dtype=torch.float16)
-        dones = torch.zeros(dones_shape, dtype=torch.bool)
-        masks = torch.zeros(masks_shape, dtype=torch.bool)
-
-    global_step = 0
-
-    def process_observations(obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        with fabric.device:
-            # Assume obs comes in with shape (n_envs, 2, channels, 24, 24)
+    def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Processes raw observations from the environment."""
+        with self.fabric.device:
+            # Assume obs shape: (n_envs, 2, channels, 24, 24)
             obs_tensor = torch.from_numpy(obs).half()
-
-            # Process each agent's observations separately
             augmented_obs = []
-            for agent_idx in range(n_agents):
+            for agent_idx in range(self.n_agents):
                 agent_obs = obs_tensor[:, agent_idx, ...]
-                augmented_agent_obs = agent.augment_observation(agent_obs)
+                augmented_agent_obs = self.agent.augment_observation(agent_obs)
                 augmented_obs.append(augmented_agent_obs)
-
-            # Stack along agent dimension (n_envs, n_agents, channels, 24, 24)
             augmented_obs = torch.stack(augmented_obs, dim=1)
 
-            # Process masks and rewards for both agents
+            # Process masks.
             mask = torch.stack(
                 [
                     torch.from_numpy(infos[agent_name][env_idx][4]).bool()
-                    for env_idx in range(cfg.n_envs)
-                    for agent_name in agent_names
+                    for env_idx in range(self.cfg.n_envs)
+                    for agent_name in self.agent_names
                 ]
-            ).reshape(cfg.n_envs, n_agents, 24, 24, 4)
+            ).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
 
-            agent_1_rewards = torch.tensor([infos[agent_names[0]][env_idx][5] for env_idx in range(cfg.n_envs)])
-            agent_2_rewards = torch.tensor([infos[agent_names[1]][env_idx][5] for env_idx in range(cfg.n_envs)])
-            rewards = torch.stack([agent_1_rewards, agent_2_rewards], dim=1)
+            # Process rewards.
+            agent_rewards = []
+            for agent_name in self.agent_names:
+                
+                rewards_agent = torch.tensor(
+                    [infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)]
+                )
+                agent_rewards.append(rewards_agent)
+            rewards = torch.stack(agent_rewards, dim=1)
 
         return augmented_obs, mask, rewards
 
-    next_obs, infos = envs.reset()
-    next_obs, mask, _ = process_observations(next_obs, infos)
-    with fabric.device:
-        next_done = torch.zeros(cfg.n_envs, dtype=torch.bool)
+    def run(self):
+        """Runs the main training loop."""
+        next_obs, infos = self.envs.reset()
+        next_obs, mask, _ = self.process_observations(next_obs, infos)
+        with self.fabric.device:
+            next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool)
 
-    for iteration in range(1, cfg.training_iterations + 1):
-        for step in range(0, cfg.n_steps):
-            global_step += cfg.n_envs
-            obs[step] = next_obs
-            dones[step] = next_done
-            masks[step] = mask
+        global_step = 0
 
-            with torch.no_grad():
-                # Get actions for player 1 (active player)
-                player1_obs = next_obs[:, 0]  # Shape: (n_envs, channels, 24, 24)
-                player1_mask = mask[:, 0]  # Shape: (n_envs, 24, 24, 4)
-                player1_actions, player1_logprobs, _ = network.get_action(player1_obs, player1_mask)
+        for iteration in range(1, self.cfg.training_iterations + 1):
+            for step in range(0, self.cfg.n_steps):
+                global_step += self.cfg.n_envs
+                self.obs[step] = next_obs
+                self.dones[step] = next_done
+                self.masks[step] = mask
 
-                # Create dummy actions for player 2
-                dummy_actions = torch.ones_like(player1_actions)
-                dummy_actions[:, 1:] = 0
-                dummy_logprobs = torch.zeros_like(player1_logprobs)
+                with torch.no_grad():
+                    # Compute actions for the active player.
+                    player1_obs = next_obs[:, 0]
+                    player1_mask = mask[:, 0]
+                    player1_actions, player1_logprobs, _ = self.network.get_action(player1_obs, player1_mask)
 
-                # Store actions and logprobs with explicit agent dimension
-                actions[step, :, 0] = player1_actions
-                actions[step, :, 1] = dummy_actions
-                logprobs[step, :, 0] = player1_logprobs
-                logprobs[step, :, 1] = dummy_logprobs
+                    # Create dummy actions for the second agent.
+                    dummy_actions = torch.ones_like(player1_actions)
+                    dummy_actions[:, 1:] = 0
+                    dummy_logprobs = torch.zeros_like(player1_logprobs)
 
-            # Reshape actions for environment step
-            _actions = actions[step].cpu().numpy().astype(int)  # Shape: (n_envs, n_agents, 5)
-            next_obs, _, terminations, truncations, infos = envs.step(_actions)
-            next_obs, mask, step_rewards = process_observations(next_obs, infos)
-            rewards[step] = step_rewards
+                    self.actions[step, :, 0] = player1_actions
+                    self.actions[step, :, 1] = dummy_actions
+                    self.logprobs[step, :, 0] = player1_logprobs
+                    self.logprobs[step, :, 1] = dummy_logprobs
 
-            # Print rewards if any agent wins
-            if torch.any(step_rewards == 1):
-                fabric.print(f"Step {step} rewards with 1: {step_rewards}")
+                # Step the environment.
+                _actions = self.actions[step].cpu().numpy().astype(int)
+                next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
+                next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
+                self.rewards[step] = step_rewards
 
-            next_done = np.logical_or(terminations, truncations)
-            with fabric.device:
-                next_done = torch.tensor(next_done, dtype=torch.bool)
+                next_done = np.logical_or(terminations, truncations)
+                with self.fabric.device:
+                    next_done = torch.tensor(next_done, dtype=torch.bool)
 
-        # Calculate returns
-        with torch.no_grad(), fabric.device:
-            returns = torch.zeros_like(rewards)
-            next_value = torch.zeros_like(rewards[0])
-            next_non_terminal = 1.0 - next_done.float().unsqueeze(-1)  # Add agent dimension
+                if torch.any(step_rewards == 1):
+                    self.fabric.print(f"Step {step} rewards with 1: {step_rewards}")
+                    self.fabric.print(f"Next done: {next_done}")
 
-            for t in reversed(range(cfg.n_steps)):
-                returns[t] = rewards[t] + cfg.gamma * next_value * next_non_terminal
-                next_value = returns[t]
-                next_non_terminal = 1.0 - dones[t].float().unsqueeze(-1)  # Add agent dimension
+            # Compute returns after collecting rollout.
+            with torch.no_grad(), self.fabric.device:
+                returns = torch.zeros_like(self.rewards)
+                next_value = torch.zeros_like(self.rewards[0])
+                next_non_terminal = 1.0 - next_done.float().unsqueeze(-1)
+                for t in reversed(range(self.cfg.n_steps)):
+                    returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
+                    next_value = returns[t]
+                    next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
 
-        # Logging with explicit agent dimension
-        total_reward_p1 = rewards[:, :, 0].sum().item()  # First agent
-        total_reward_p2 = rewards[:, :, 1].sum().item()  # Second agent
+            total_reward_p1 = self.rewards[:, :, 0].sum().item()
+            total_reward_p2 = self.rewards[:, :, 1].sum().item()
+            finished_games = self.dones.sum().item()
+            mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
+            mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
 
-        # Count the number of finished games (each True in dones is one finished game)
-        finished_games = dones.sum().item()
+            self.fabric.print(
+                f"Iteration {iteration} stats - "
+                f"Player 1: Total Reward = {total_reward_p1:.2f}, Mean Reward = {mean_reward_p1:.2f}; "
+                f"Player 2: Total Reward = {total_reward_p2:.2f}, Mean Reward = {mean_reward_p2:.2f}; "
+                f"Finished games: {finished_games}"
+            )
+            self.fabric.print(f"Iteration {iteration} completed")
 
-        # Compute mean rewards (guard against division by zero)
-        mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
-        mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
+        self.logger.close()
 
-        # Use fabric.print for distributed logging
-        fabric.print(
-            f"Iteration {iteration} stats - "
-            f"Player 1: Total Reward = {total_reward_p1:.2f}, Mean Reward = {mean_reward_p1:.2f}; "
-            f"Player 2: Total Reward = {total_reward_p2:.2f}, Mean Reward = {mean_reward_p2:.2f}; "
-            f"Finished games: {finished_games}"
-        )
-        # -------------------------------------------------
 
-        # Use fabric.print instead of print for proper distributed logging
-        fabric.print(f"Iteration {iteration} completed")
-
-    logger.close()
+def main(args):
+    cfg = SelfPlayConfig()
+    trainer = SelfPlayTrainer(cfg)
+    trainer.run()
 
 
 if __name__ == "__main__":
