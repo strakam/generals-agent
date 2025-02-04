@@ -9,8 +9,7 @@ from lightning.fabric import Fabric
 
 from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import LandRewardFn
-from supervised.network import load_network, Network
-from supervised.agent import SelfPlayAgent
+from network import load_network, Network
 
 
 @dataclass
@@ -124,10 +123,9 @@ class SelfPlayTrainer:
         if cfg.checkpoint_path != "":
             self.network = load_network(cfg.checkpoint_path)
         else:
-            self.network = Network()
+            self.network = Network(batch_size=cfg.n_envs)
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.agent = SelfPlayAgent(network=self.network, batch_size=cfg.n_envs, device=self.fabric.device)
 
         # Create environment.
         agent_names = ["1", "2"]
@@ -136,7 +134,7 @@ class SelfPlayTrainer:
 
         # Setup expected tensor shapes for rollouts.
         self.n_agents = 2
-        self.n_channels = self.agent.n_channels
+        self.n_channels = self.network.n_channels
         self.obs_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, self.n_channels, 24, 24)
         self.masks_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 24, 24, 4)
         self.actions_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 5)
@@ -166,7 +164,7 @@ class SelfPlayTrainer:
             augmented_obs = []
             for agent_idx in range(self.n_agents):
                 agent_obs = obs_tensor[:, agent_idx, ...]
-                augmented_agent_obs = self.agent.augment_observation(agent_obs)
+                augmented_agent_obs = self.network.augment_observation(agent_obs)
                 augmented_obs.append(augmented_agent_obs)
             augmented_obs = torch.stack(augmented_obs, dim=1)
 

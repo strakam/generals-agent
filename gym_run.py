@@ -3,7 +3,7 @@ import numpy as np
 import gymnasium as gym
 from generals.envs import GymnasiumGenerals
 from generals import GridFactory
-from modules.agent import load_agent
+from supervised.agent import load_agent
 
 n_envs = 1
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

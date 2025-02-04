@@ -15,8 +15,8 @@ from itertools import combinations
 
 from generals import GridFactory
 from generals.envs import GymnasiumGenerals
-from modules.network import Network
-from modules.agent import NeuroAgent
+from supervised.network import Network
+from supervised.agent import NeuroAgent
 
 
 @dataclass

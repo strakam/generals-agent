@@ -1,10 +1,15 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.functional import max_pool2d
 import lightning as L
 
 
 class Network(L.LightningModule):
+    GRID_SIZE = 24
+    DEFAULT_HISTORY_SIZE = 5
+    DEFAULT_BATCH_SIZE = 1
+
     def __init__(
         self,
         lr: float = 1e-4,
@@ -12,11 +17,16 @@ class Network(L.LightningModule):
         repeats: list[int] = [2, 2, 2, 1],
         channel_sequence: list[int] = [256, 320, 384, 384],
         compile: bool = False,
+        history_size: int = DEFAULT_HISTORY_SIZE,
+        batch_size: int = DEFAULT_BATCH_SIZE,
     ):
         super().__init__()
         c, h, w = 31, 24, 24
         self.lr = lr
         self.n_steps = n_steps
+        self.history_size = history_size
+        self.batch_size = batch_size
+        self.n_channels = 21 + 2 * self.history_size
 
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -51,6 +61,135 @@ class Network(L.LightningModule):
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
+        self.reset()
+
+    @torch.compile
+    def reset(self):
+        """
+        Reset the network's internal state.
+        The state contains things that the network remembers over time (positions of generals, etc.).
+        """
+        shape = (self.batch_size, 24, 24)
+        history_shape = (self.batch_size, self.history_size, 24, 24)
+
+        device = self.device
+        self.army_stack = torch.zeros(history_shape, device=device)
+        self.enemy_stack = torch.zeros(history_shape, device=device)
+        self.last_army = torch.zeros(shape, device=device)
+        self.last_enemy_army = torch.zeros(shape, device=device)
+        self.cities = torch.zeros(shape, device=device).bool()
+        self.generals = torch.zeros(shape, device=device).bool()
+        self.mountains = torch.zeros(shape, device=device).bool()
+        self.seen = torch.zeros(shape, device=device).bool()
+        self.enemy_seen = torch.zeros(shape, device=device).bool()
+        self.last_observation = torch.zeros(
+            (self.batch_size, self.n_channels, 24, 24), device=device
+        )
+
+    def reset_histories(self, obs: torch.Tensor):
+        # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
+        timestep_mask = obs[:, 13, 0, 0] == 0.0
+
+        attributes_to_reset = [
+            "army_stack",
+            "enemy_stack",
+            "last_army",
+            "last_enemy_army",
+            "seen",
+            "enemy_seen",
+            "cities",
+            "generals",
+            "mountains",
+        ]
+
+        for attr in attributes_to_reset:
+            getattr(self, attr)[timestep_mask] = 0
+
+    @torch.compile
+    def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Here the network augments what it knows about the game with the new observation.
+        This is then further used to make a decision.
+        """
+        armies = 0
+        generals = 1
+        cities = 2
+        mountains = 3
+        neutral_cells = 4
+        owned_cells = 5
+        opponent_cells = 6
+        fog_cells = 7
+        structures_in_fog = 8
+        owned_land_count = 9
+        owned_army_count = 10
+        opponent_land_count = 11
+        opponent_army_count = 12
+        timestep = 13
+        priority = 14
+
+        self.reset_histories(obs)
+
+        # Calculate current army states
+        current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
+        current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
+
+        # Update history stacks by shifting and adding new differences
+        self.army_stack = torch.roll(self.army_stack, shifts=1, dims=1)
+        self.enemy_stack = torch.roll(self.enemy_stack, shifts=1, dims=1)
+
+        self.army_stack[:, 0, :, :] = current_army - self.last_army
+        self.enemy_stack[:, 0, :, :] = current_enemy_army - self.last_enemy_army
+
+        # Store current states for next iteration
+        self.last_army = current_army
+        self.last_enemy_army = current_enemy_army
+
+        self.seen = torch.logical_or(
+            self.seen,
+            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
+        )
+
+        self.enemy_seen = torch.logical_or(
+            self.enemy_seen,
+            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
+        )
+
+        self.cities |= obs[:, cities, :, :].bool()
+        self.generals |= obs[:, generals, :, :].bool()
+        self.mountains |= obs[:, mountains, :, :].bool()
+
+        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        channels = torch.stack(
+            [
+                obs[:, armies, :, :],
+                obs[:, armies, :, :] * obs[:, owned_cells, :, :],
+                obs[:, armies, :, :] * obs[:, opponent_cells, :, :],
+                obs[:, armies, :, :] * obs[:, neutral_cells, :, :],
+                self.seen,
+                self.enemy_seen,  # enemy sight
+                self.generals,
+                self.cities,
+                self.mountains,
+                obs[:, neutral_cells, :, :],
+                obs[:, owned_cells, :, :],
+                obs[:, opponent_cells, :, :],
+                obs[:, fog_cells, :, :],
+                obs[:, structures_in_fog, :, :],
+                obs[:, timestep, :, :] * ones,
+                (obs[:, timestep, :, :] % 50) * ones / 50,
+                obs[:, priority, :, :] * ones,
+                obs[:, owned_land_count, :, :] * ones,
+                obs[:, owned_army_count, :, :] * ones,
+                obs[:, opponent_land_count, :, :] * ones,
+                obs[:, opponent_army_count, :, :] * ones,
+            ],
+            dim=1,
+        )
+        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
+        augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
+        self.last_observation = augmented_obs
+        return augmented_obs
+
     @torch.compile
     def normalize_observations(self, obs):
         timestep_normalize = 500
@@ -80,59 +219,99 @@ class Network(L.LightningModule):
 
         return square_mask, direction_mask
 
-    def forward(self, obs, mask, teacher_cells=None):
-        obs = self.normalize_observations(obs)
-        x = self.backbone(obs)
-        # value = self.value_head(x)
-
+    def get_action(self, obs, mask, action=None):
+        mask = mask.float()
+        obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(x)
+
+        representation = self.backbone(obs)
+        
+        square_logits = self.square_head(representation)
         square_logits = (square_logits + square_mask).flatten(1)
 
-        if teacher_cells is not None:
-            square = teacher_cells
+        # Sample square from categorical distribution
+        square_probs = F.softmax(square_logits, dim=1)
+        square_dist = torch.distributions.Categorical(square_probs)
+        if action is None:
+            square = square_dist.sample()
         else:
-            square = torch.argmax(square_logits, dim=1).int()
+            square = action[:, 1] * 24 + action[:, 2]
+
+        # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction = direction + direction_mask
 
         i, j = square // 24, square % 24
-        direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return square_logits, direction
+        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
-    def training_step(self, batch, batch_idx):
-        obs, mask, values, actions = batch
-        target_i = actions[:, 1]
-        target_j = actions[:, 2]
-        target_cell = target_i * 24 + target_j
+        # Sample direction
+        direction_probs = F.softmax(direction, dim=1)
+        direction_dist = torch.distributions.Categorical(direction_probs)
+        if action is None:
+            direction = direction_dist.sample()
+        else:
+            direction = action[:, 3]
 
-        square, direction = self(obs, mask, target_cell)
+        # Calculate log probabilities
+        square_logprob = square_dist.log_prob(square)
+        direction_logprob = direction_dist.log_prob(direction)
+        logprob = square_logprob + direction_logprob
+        entropy = square_dist.entropy() + direction_dist.entropy()
 
-        square_loss = self.square_loss(square, target_cell.long())
-        direction_loss = self.direction_loss(direction, actions[:, 3])
-        # value_loss = self.value_loss(value.flatten(), values)
+        # Create action tensor with shape [batch_size, 5]
+        zeros = torch.zeros_like(square, dtype=torch.float)
+        row = square // 24
+        col = square % 24
+        action = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        action[action[:, 3] == 4, 0] = 1  # pass action
 
-        loss = square_loss + direction_loss
-        # loss
-        # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
-        self.log("square_loss", square_loss, on_step=True, prog_bar=True)
-        self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
-        self.log("loss", loss, on_step=True, prog_bar=True)
+        return action, logprob, entropy
+
+    def ppo_loss(self, batch, args):
+        obs = batch["observations"]
+        masks = batch["masks"]
+        actions = batch["actions"]
+        returns = batch["returns"]
+        logprobs = batch["logprobs"]
+
+        _, newlogprobs, entropy = self.get_action(obs, masks, actions)
+        ratio = (newlogprobs - logprobs).exp()
+
+        pg_loss1 = -returns * ratio
+        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+        entropy_loss = entropy.mean()
+        loss = pg_loss - args.ent_coef * entropy_loss
+
+        # Log PPO-specific metrics
+        with torch.no_grad():
+            # Log policy metrics
+            self.log("ppo/policy_loss", pg_loss, on_step=True)
+            self.log("ppo/entropy", entropy_loss, on_step=True)
+            self.log("ppo/total_loss", loss, on_step=True)
+
+            # Log policy statistics
+            self.log("ppo/mean_ratio", ratio.mean(), on_step=True)
+            self.log("ppo/max_ratio", ratio.max(), on_step=True)
+            self.log("ppo/min_ratio", ratio.min(), on_step=True)
+
+            # Log value statistics
+            self.log("ppo/mean_returns", returns.mean(), on_step=True)
+            self.log("ppo/max_returns", returns.max(), on_step=True)
+            self.log("ppo/min_returns", returns.min(), on_step=True)
+
         return loss
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.n_steps, eta_min=1e-5)
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "step",
-                "name": "learning_rate",
-            },
-        }
+    def configure_optimizers(self, lr: float = None, n_steps: int = None):
+        lr = lr or self.lr
+        n_steps = n_steps or self.n_steps
+
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
+        return optimizer, scheduler
 
     def on_after_backward(self):
         # Track gradients for high-level modules: backbone, value_head, square_head, direction_head
