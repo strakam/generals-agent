@@ -16,13 +16,13 @@ from network import load_network, Network
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 256
-    n_steps: int = 100
-    batch_size: int = 256
+    n_envs: int = 3
+    n_steps: int = 10
+    batch_size: int = 14
     n_epochs: int = 3
     truncation: int = 1500
     grid_size: int = 8
-    checkpoint_path: str = ""  # "step=52000.ckpt"
+    checkpoint_path: str = "step=52000.ckpt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -57,19 +57,25 @@ class NeptuneLogger:
         """Log experiment configuration parameters."""
         if self.fabric.is_global_zero:
             self.run["parameters"] = {
-                "n_envs": self.config.n_envs,
+                # Training hyperparameters
                 "training_iterations": self.config.training_iterations,
                 "n_steps": self.config.n_steps,
+                "n_epochs": self.config.n_epochs,
+                "batch_size": self.config.batch_size,
+                "n_envs": self.config.n_envs,
+                # Environment settings
                 "truncation": self.config.truncation,
+                # PPO hyperparameters
+                "learning_rate": self.config.learning_rate,
+                "gamma": self.config.gamma,
+                "clip_coef": self.config.clip_coef,
+                "ent_coef": self.config.ent_coef,
+                "max_grad_norm": self.config.max_grad_norm,
+                # Infrastructure settings
                 "checkpoint_path": self.config.checkpoint_path,
                 "strategy": self.config.strategy,
                 "accelerator": self.config.accelerator,
                 "devices": self.config.devices,
-                "gamma": self.config.gamma,
-                "learning_rate": self.config.learning_rate,
-                "max_grad_norm": self.config.max_grad_norm,
-                "clip_coef": self.config.clip_coef,
-                "ent_coef": self.config.ent_coef,
             }
 
     def log_metrics(self, metrics: dict):
@@ -121,7 +127,7 @@ class SelfPlayTrainer:
 
         # Load network or initialize new one, set up optimizer, and configure the agent.
         if cfg.checkpoint_path != "":
-            self.network = load_network(cfg.checkpoint_path)
+            self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
         else:
             self.network = Network(batch_size=cfg.n_envs)
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
@@ -208,7 +214,7 @@ class SelfPlayTrainer:
         """
         with self.fabric.device:
             # Assume obs shape: (n_envs, 2, channels, 24, 24)
-            obs_tensor = torch.from_numpy(obs).half().to(self.fabric.device)
+            obs_tensor = torch.from_numpy(obs).to(self.fabric.device)
             augmented_obs = []
             for agent_idx in range(self.n_agents):
                 agent_obs = obs_tensor[:, agent_idx, ...]
@@ -304,7 +310,7 @@ class SelfPlayTrainer:
                 "masks": b_masks,
             }
 
-            self.train(self.fabric, dataset)
+            # self.train(self.fabric, dataset)
 
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()

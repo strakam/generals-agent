@@ -21,24 +21,14 @@ class Network(L.LightningModule):
         batch_size: int = DEFAULT_BATCH_SIZE,
     ):
         super().__init__()
-        c, h, w = 31, 24, 24
         self.lr = lr
         self.n_steps = n_steps
         self.history_size = history_size
         self.batch_size = batch_size
         self.n_channels = 21 + 2 * self.history_size
 
-        self.backbone = Pyramid(c, repeats, channel_sequence)
+        self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
         final_channels = channel_sequence[0]
-
-        self.value_head = nn.Sequential(
-            Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(h * w, 1),
-            Lambda(lambda x: 2.0 * torch.tanh(x)),  # Scale up tanh
-        )
 
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
@@ -51,13 +41,10 @@ class Network(L.LightningModule):
         )
 
         self.square_loss = nn.CrossEntropyLoss()
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 20])
-        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
-        self.value_loss = nn.MSELoss()
+        self.direction_loss = nn.CrossEntropyLoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone)
-            self.value_head = torch.compile(self.value_head)
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
@@ -158,6 +145,30 @@ class Network(L.LightningModule):
         self.mountains |= obs[:, mountains, :, :].bool()
 
         ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        # Print shapes of channels to be stacked
+        print("Armies shape:", obs[:, armies, :, :].shape)
+        print("Owned armies shape:", (obs[:, armies, :, :] * obs[:, owned_cells, :, :]).shape)
+        print("Enemy armies shape:", (obs[:, armies, :, :] * obs[:, opponent_cells, :, :]).shape)
+        print("Neutral armies shape:", (obs[:, armies, :, :] * obs[:, neutral_cells, :, :]).shape)
+        print("Seen shape:", self.seen.shape)
+        print("Enemy seen shape:", self.enemy_seen.shape)
+        print("Generals shape:", self.generals.shape)
+        print("Cities shape:", self.cities.shape)
+        print("Mountains shape:", self.mountains.shape)
+        print("Neutral cells shape:", obs[:, neutral_cells, :, :].shape)
+        print("Owned cells shape:", obs[:, owned_cells, :, :].shape)
+        print("Opponent cells shape:", obs[:, opponent_cells, :, :].shape)
+        print("Fog cells shape:", obs[:, fog_cells, :, :].shape)
+        print("Structures in fog shape:", obs[:, structures_in_fog, :, :].shape)
+        print("Timestep shape:", (obs[:, timestep, :, :] * ones).shape)
+        print("Timestep mod shape:", ((obs[:, timestep, :, :] % 50) * ones / 50).shape)
+        print("Priority shape:", (obs[:, priority, :, :] * ones).shape)
+        print("Owned land count shape:", (obs[:, owned_land_count, :, :] * ones).shape)
+        print("Owned army count shape:", (obs[:, owned_army_count, :, :] * ones).shape)
+        print("Opponent land count shape:", (obs[:, opponent_land_count, :, :] * ones).shape)
+        print("Opponent army count shape:", (obs[:, opponent_army_count, :, :] * ones).shape)
+        print("Army stacks shape:", self.army_stack.shape)
+        print("Enemy stacks shape:", self.enemy_stack.shape)
         channels = torch.stack(
             [
                 obs[:, armies, :, :],
@@ -224,7 +235,7 @@ class Network(L.LightningModule):
         square_mask, direction_mask = self.prepare_masks(obs, mask)
 
         representation = self.backbone(obs)
-        
+
         square_logits = self.square_head(representation)
         square_logits = (square_logits + square_mask).flatten(1)
 
@@ -316,7 +327,6 @@ class Network(L.LightningModule):
         # Track gradients for high-level modules: backbone, value_head, square_head, direction_head
         high_level_modules = {
             "backbone": self.backbone,
-            "value_head": self.value_head,
             "square_head": self.square_head,
             "direction_head": self.direction_head,
         }
@@ -473,7 +483,7 @@ class Lambda(nn.Module):
         return self.func(x)
 
 
-def load_network(path: str, eval_mode: bool = True) -> Network:
+def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     """Load a network from a checkpoint file.
 
     Args:
@@ -487,12 +497,17 @@ def load_network(path: str, eval_mode: bool = True) -> Network:
     checkpoint = torch.load(path, map_location=device)
     state_dict = checkpoint["state_dict"]
 
-    model = Network(compile=True)
+    model = Network(batch_size=batch_size, compile=True)  # Initially create without compilation
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
-
+    
+    model = model.to(device)
     if eval_mode:
         model.eval()
+    
+    # Only compile after loading and moving to device
+    if torch.cuda.is_available():
+        model = torch.compile(model)
 
     return model
