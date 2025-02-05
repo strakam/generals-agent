@@ -263,14 +263,14 @@ class Network(L.LightningModule):
         logprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self.get_action(obs, masks, actions)
-        ratio = (newlogprobs - logprobs).exp()
+        ratio = torch.exp(newlogprobs - logprobs)
 
-        pg_loss1 = -returns * ratio
-        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+        pg_loss1 = returns * ratio
+        pg_loss2 = returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+        pg_loss = torch.min(pg_loss1, pg_loss2).mean()
 
         entropy_loss = entropy.mean()
-        loss = pg_loss - args.ent_coef * entropy_loss
+        loss = -pg_loss - args.ent_coef * entropy_loss
 
         # Log PPO-specific metrics
         with torch.no_grad():

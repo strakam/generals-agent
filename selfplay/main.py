@@ -29,7 +29,7 @@ class SelfPlayConfig:
     learning_rate: float = 3e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.5  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.01  # Entropy coefficient
+    ent_coef: float = 0.00  # Entropy coefficient
 
     # Lightning fabric parameters
     strategy: str = "auto"
