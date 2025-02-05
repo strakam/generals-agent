@@ -16,16 +16,16 @@ from network import load_network, Network
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 3
-    n_steps: int = 10
-    batch_size: int = 14
+    n_envs: int = 256
+    n_steps: int = 100
+    batch_size: int = 512
     n_epochs: int = 3
     truncation: int = 1500
     grid_size: int = 8
-    checkpoint_path: str = "step=52000.ckpt"
+    checkpoint_path: str = ""#"step=52000.ckpt"
 
     # PPO parameters
-    gamma: float = 1.0  # Discount factor
+    gamma: float = 0.99 # Discount factor
     learning_rate: float = 3e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.5  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
@@ -215,11 +215,7 @@ class SelfPlayTrainer:
         with self.fabric.device:
             # Assume obs shape: (n_envs, 2, channels, 24, 24)
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device)
-            augmented_obs = []
-            for agent_idx in range(self.n_agents):
-                agent_obs = obs_tensor[:, agent_idx, ...]
-                augmented_agent_obs = self.network.augment_observation(agent_obs)
-                augmented_obs.append(augmented_agent_obs)
+            augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
 
             # Process masks.
@@ -310,7 +306,7 @@ class SelfPlayTrainer:
                 "masks": b_masks,
             }
 
-            # self.train(self.fabric, dataset)
+            self.train(self.fabric, dataset)
 
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()

@@ -145,30 +145,6 @@ class Network(L.LightningModule):
         self.mountains |= obs[:, mountains, :, :].bool()
 
         ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
-        # Print shapes of channels to be stacked
-        print("Armies shape:", obs[:, armies, :, :].shape)
-        print("Owned armies shape:", (obs[:, armies, :, :] * obs[:, owned_cells, :, :]).shape)
-        print("Enemy armies shape:", (obs[:, armies, :, :] * obs[:, opponent_cells, :, :]).shape)
-        print("Neutral armies shape:", (obs[:, armies, :, :] * obs[:, neutral_cells, :, :]).shape)
-        print("Seen shape:", self.seen.shape)
-        print("Enemy seen shape:", self.enemy_seen.shape)
-        print("Generals shape:", self.generals.shape)
-        print("Cities shape:", self.cities.shape)
-        print("Mountains shape:", self.mountains.shape)
-        print("Neutral cells shape:", obs[:, neutral_cells, :, :].shape)
-        print("Owned cells shape:", obs[:, owned_cells, :, :].shape)
-        print("Opponent cells shape:", obs[:, opponent_cells, :, :].shape)
-        print("Fog cells shape:", obs[:, fog_cells, :, :].shape)
-        print("Structures in fog shape:", obs[:, structures_in_fog, :, :].shape)
-        print("Timestep shape:", (obs[:, timestep, :, :] * ones).shape)
-        print("Timestep mod shape:", ((obs[:, timestep, :, :] % 50) * ones / 50).shape)
-        print("Priority shape:", (obs[:, priority, :, :] * ones).shape)
-        print("Owned land count shape:", (obs[:, owned_land_count, :, :] * ones).shape)
-        print("Owned army count shape:", (obs[:, owned_army_count, :, :] * ones).shape)
-        print("Opponent land count shape:", (obs[:, opponent_land_count, :, :] * ones).shape)
-        print("Opponent army count shape:", (obs[:, opponent_army_count, :, :] * ones).shape)
-        print("Army stacks shape:", self.army_stack.shape)
-        print("Enemy stacks shape:", self.enemy_stack.shape)
         channels = torch.stack(
             [
                 obs[:, armies, :, :],
