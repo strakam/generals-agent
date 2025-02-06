@@ -200,8 +200,7 @@ class Network(L.LightningModule):
         pad_w = 24 - direction_mask.shape[3]
         mask = F.pad(direction_mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
         zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
-        direction_mask = torch.cat((mask, zero_layer), dim=1)
-        direction_mask = direction_mask * -1e9
+        direction_mask = torch.cat((mask, zero_layer), dim=1) * -1e9
 
         return square_mask, direction_mask
 
@@ -216,8 +215,7 @@ class Network(L.LightningModule):
         square_logits = (square_logits + square_mask).flatten(1)
 
         # Sample square from categorical distribution
-        square_probs = F.softmax(square_logits, dim=1)
-        square_dist = torch.distributions.Categorical(square_probs)
+        square_dist = torch.distributions.Categorical(logits=square_logits)
         if action is None:
             square = square_dist.sample()
         else:
@@ -227,14 +225,13 @@ class Network(L.LightningModule):
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
-        direction = direction + direction_mask
+        direction = direction # TODO: + direction_mask
 
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
         # Sample direction
-        direction_probs = F.softmax(direction, dim=1)
-        direction_dist = torch.distributions.Categorical(direction_probs)
+        direction_dist = torch.distributions.Categorical(logits=direction)
         if action is None:
             direction = direction_dist.sample()
         else:
@@ -265,31 +262,14 @@ class Network(L.LightningModule):
         _, newlogprobs, entropy = self.get_action(obs, masks, actions)
         ratio = torch.exp(newlogprobs - logprobs)
 
-        pg_loss1 = returns * ratio
-        pg_loss2 = returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-        pg_loss = torch.min(pg_loss1, pg_loss2).mean()
+        pg_loss1 = -returns * ratio
+        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
         entropy_loss = entropy.mean()
-        loss = -pg_loss - args.ent_coef * entropy_loss
+        loss = pg_loss - args.ent_coef * entropy_loss
 
-        # Log PPO-specific metrics
-        with torch.no_grad():
-            # Log policy metrics
-            self.log("ppo/policy_loss", pg_loss, on_step=True)
-            self.log("ppo/entropy", entropy_loss, on_step=True)
-            self.log("ppo/total_loss", loss, on_step=True)
-
-            # Log policy statistics
-            self.log("ppo/mean_ratio", ratio.mean(), on_step=True)
-            self.log("ppo/max_ratio", ratio.max(), on_step=True)
-            self.log("ppo/min_ratio", ratio.min(), on_step=True)
-
-            # Log value statistics
-            self.log("ppo/mean_returns", returns.mean(), on_step=True)
-            self.log("ppo/max_returns", returns.max(), on_step=True)
-            self.log("ppo/min_returns", returns.min(), on_step=True)
-
-        return loss
+        return loss, pg_loss, entropy_loss, ratio, returns
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
