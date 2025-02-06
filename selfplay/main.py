@@ -143,6 +143,7 @@ class SelfPlayTrainer:
             self.network = Network(batch_size=cfg.n_envs)
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
+        self.network.mark_forward_method("get_action")
 
         self.network.reset()
 
