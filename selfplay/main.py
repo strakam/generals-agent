@@ -213,7 +213,7 @@ class SelfPlayTrainer:
                 batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
-                loss, pg_loss, entropy_loss, ratio, returns = self.network.ppo_loss(batch, self.cfg)
+                loss, pg_loss, entropy_loss, ratio, returns = self.network.training_step(batch, self.cfg)
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)

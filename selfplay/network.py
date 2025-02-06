@@ -252,7 +252,7 @@ class Network(L.LightningModule):
 
         return action, logprob, entropy
 
-    def ppo_loss(self, batch, args):
+    def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
         actions = batch["actions"]
