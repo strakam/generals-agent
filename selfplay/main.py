@@ -30,10 +30,10 @@ class SelfPlayConfig:
     n_envs: int = 8
     n_steps: int = 64
     batch_size: int = 64
-    n_epochs: int = 1
+    n_epochs: int = 2
     truncation: int = 1500
     grid_size: int = 20
-    checkpoint_path: str = ""  # "step=52000.ckpt"
+    checkpoint_path: str = "step=52000.ckpt"
 
     # PPO parameters
     gamma: float = 0.99  # Discount factor
@@ -111,7 +111,7 @@ def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.ve
                 grid_factory=grid_factory,
                 truncation=config.truncation,
                 pad_observations_to=24,
-                reward_fn=RewardFn2(),
+                reward_fn=LandRewardFn(),
             )
             for _ in range(config.n_envs)
         ],
