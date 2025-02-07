@@ -204,7 +204,7 @@ class Network(L.LightningModule):
 
         return square_mask, direction_mask
 
-    def get_action(self, obs, mask, action=None):
+    def forward(self, obs, mask, action=None):
         mask = mask.float()
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask)
@@ -259,7 +259,7 @@ class Network(L.LightningModule):
         returns = batch["returns"]
         logprobs = batch["logprobs"]
 
-        _, newlogprobs, entropy = self.get_action(obs, masks, actions)
+        _, newlogprobs, entropy = self(obs, masks, actions)
         ratio = torch.exp(newlogprobs - logprobs)
 
         pg_loss1 = -returns * ratio
@@ -297,9 +297,6 @@ class Network(L.LightningModule):
 
             # Log the gradient norm for this module
             self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
-
-        # also log learning rate
-        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
 
 
 class Pyramid(nn.Module):
