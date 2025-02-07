@@ -225,7 +225,7 @@ class Network(L.LightningModule):
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
-        direction = direction # TODO: + direction_mask
+        direction = direction + direction_mask
 
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]

@@ -31,7 +31,7 @@ def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch
     actions[:, 2] = torch.randint(0, 4, (batch_size,), device=device)  # j coordinate
     actions[:, 3] = torch.randint(0, 4, (batch_size,), device=device)  # direction
     # Generate random logprobs (since these are random actions)
-    logprobs = torch.ones(batch_size, device=device) * float('-inf')  # -inf logprob for random actions
+    logprobs = torch.ones(batch_size, device=device) * float("-inf")  # -inf logprob for random actions
     return actions, logprobs
 
 
@@ -40,7 +40,7 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 8
-    n_steps: int = 64
+    n_steps: int = 300
     batch_size: int = 64
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
@@ -218,6 +218,8 @@ class SelfPlayTrainer:
             mean_returns = 0
             mean_ratio = 0
             num_batches = 0
+            mean_policy_loss = 0
+            mean_entropy_loss = 0
 
             for batch_idx, batch_indices in enumerate(pbar):
                 # Convert indices list to tensor for indexing
@@ -228,7 +230,9 @@ class SelfPlayTrainer:
 
                 # Check if ratios are 1.0 in first epoch and first batch
                 if epoch == 1 and batch_idx == 0:
-                    assert torch.allclose(ratio, torch.ones_like(ratio), atol=1e-4), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
+                    assert torch.allclose(
+                        ratio, torch.ones_like(ratio), atol=1e-4
+                    ), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
@@ -240,21 +244,39 @@ class SelfPlayTrainer:
                 mean_loss += loss.item()
                 mean_returns += returns.mean().item()
                 mean_ratio += ratio.mean().item()
+                mean_policy_loss += pg_loss.mean().item()
+                mean_entropy_loss += entropy_loss.mean().item()
                 num_batches += 1
 
                 # Update progress bar
-                pbar.set_postfix({"loss": f"{loss.item():.3f}", "returns": f"{returns.mean().item():.3f}"})
+                pbar.set_postfix(
+                    {
+                        "loss": f"{loss.item():.3f}",
+                        "returns": f"{returns.mean().item():.3f}",
+                        "policy_loss": f"{pg_loss.mean().item():.3f}",
+                        "entropy_loss": f"{entropy_loss.mean().item():.3f}",
+                    }
+                )
 
             # Calculate means and log metrics
             mean_loss /= num_batches
             mean_returns /= num_batches
             mean_ratio /= num_batches
-
+            mean_policy_loss /= num_batches
+            mean_entropy_loss /= num_batches
             # Log learning rate
             current_lr = self.optimizer.param_groups[0]["lr"]
             self.logger.log_metrics({"train/learning_rate": current_lr})
 
-            self.logger.log_metrics({"train/loss": mean_loss, "train/returns": mean_returns, "train/ratio": mean_ratio})
+            self.logger.log_metrics(
+                {
+                    "train/loss": mean_loss,
+                    "train/returns": mean_returns,
+                    "train/ratio": mean_ratio,
+                    "train/policy_loss": mean_policy_loss,
+                    "train/entropy_loss": mean_entropy_loss,
+                }
+            )
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
@@ -367,10 +389,10 @@ class SelfPlayTrainer:
             # Calculate total rewards for each player
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()
-            
+
             # Count total number of completed games across all envs
             finished_games = self.dones.sum().item()
-            
+
             # Calculate mean reward per completed game, defaulting to 0 if no games finished
             mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
             mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
