@@ -216,12 +216,6 @@ class SelfPlayTrainer:
                 sampler.set_epoch(epoch)
 
             pbar = tqdm(batch_sampler, desc=f"Epoch {epoch}/{self.cfg.n_epochs}")
-            mean_loss = 0
-            mean_returns = 0
-            mean_ratio = 0
-            num_batches = 0
-            mean_policy_loss = 0
-            mean_entropy_loss = 0
 
             for batch_idx, batch_indices in enumerate(pbar):
                 # Convert indices list to tensor for indexing
@@ -242,17 +236,19 @@ class SelfPlayTrainer:
                 fabric.clip_gradients(self.network, self.optimizer, max_norm=self.cfg.max_grad_norm)
                 self.optimizer.step()
 
-                # Update metrics
-                mean_loss += loss.item()
-                mean_returns += returns.mean().item()
-                mean_ratio += ratio.mean().item()
-                mean_policy_loss += pg_loss.mean().item()
-                mean_entropy_loss += entropy_loss.mean().item()
-                num_batches += 1
-
                 # Log gradient norms
                 for module_name, grad_norm in grad_norms.items():
                     self.logger.log_metrics({f"/grad_norm/{module_name}": grad_norm})
+
+                # Log metrics for this batch
+                current_lr = self.optimizer.param_groups[0]["lr"]
+                self.logger.log_metrics({
+                    "train/learning_rate": current_lr,
+                    "train/loss": loss.item(),
+                    "train/ratio": ratio.mean().item(),
+                    "train/policy_loss": pg_loss.mean().item(), 
+                    "train/entropy_loss": entropy_loss.mean().item()
+                })
 
                 # Update progress bar
                 pbar.set_postfix(
@@ -262,25 +258,6 @@ class SelfPlayTrainer:
                         "entropy_loss": f"{entropy_loss.mean().item():.3f}",
                     }
                 )
-
-            # Calculate means and log metrics
-            mean_loss /= num_batches
-            mean_returns /= num_batches
-            mean_ratio /= num_batches
-            mean_policy_loss /= num_batches
-            mean_entropy_loss /= num_batches
-            # Log learning rate
-            current_lr = self.optimizer.param_groups[0]["lr"]
-            self.logger.log_metrics({"train/learning_rate": current_lr})
-
-            self.logger.log_metrics(
-                {
-                    "train/loss": mean_loss,
-                    "train/ratio": mean_ratio,
-                    "train/policy_loss": mean_policy_loss,
-                    "train/entropy_loss": mean_entropy_loss,
-                }
-            )
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.

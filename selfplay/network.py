@@ -199,9 +199,8 @@ class Network(L.LightningModule):
         return square_mask, direction_mask
 
     def forward(self, obs, mask, action=None):
-        mask = mask.float()
         obs = self.normalize_observations(obs.float())
-        square_mask, direction_mask = self.prepare_masks(obs, mask)
+        square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
         representation = self.backbone(obs)
 
@@ -219,8 +218,7 @@ class Network(L.LightningModule):
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
-        direction = direction + direction_mask
-
+        direction += direction_mask
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
@@ -239,9 +237,7 @@ class Network(L.LightningModule):
 
         # Create action tensor with shape [batch_size, 5]
         zeros = torch.zeros_like(square, dtype=torch.float)
-        row = square // 24
-        col = square % 24
-        action = torch.stack([zeros, row, col, direction, zeros], dim=1)
+        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
         action[action[:, 3] == 4, 0] = 1  # pass action
 
         return action, logprob, entropy
@@ -254,6 +250,8 @@ class Network(L.LightningModule):
         logprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self(obs, masks, actions)
+        if torch.any(newlogprobs <= -1e9):
+            print(newlogprobs)
         ratio = torch.exp(newlogprobs - logprobs)
 
         pg_loss1 = -returns * ratio
