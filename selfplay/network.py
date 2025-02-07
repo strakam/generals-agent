@@ -86,6 +86,7 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
+            "last_observation",
         ]
 
         for attr in attributes_to_reset:
@@ -130,15 +131,8 @@ class Network(L.LightningModule):
         self.last_army = current_army
         self.last_enemy_army = current_enemy_army
 
-        self.seen = torch.logical_or(
-            self.seen,
-            max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool(),
-        )
-
-        self.enemy_seen = torch.logical_or(
-            self.enemy_seen,
-            max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
-        )
+        self.seen |= max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool()
+        self.enemy_seen |= max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool()
 
         self.cities |= obs[:, cities, :, :].bool()
         self.generals |= obs[:, generals, :, :].bool()
@@ -287,6 +281,7 @@ class Network(L.LightningModule):
             "direction_head": self.direction_head,
         }
 
+        grad_norms = {}
         for name, module in high_level_modules.items():
             # Calculate the norm of the gradients for each module
             grad_norm = 0
@@ -294,9 +289,9 @@ class Network(L.LightningModule):
                 if param.grad is not None:
                     grad_norm += param.grad.norm().item() ** 2
             grad_norm = grad_norm**0.5  # Take the square root to get the total norm
+            grad_norms[name] = grad_norm
 
-            # Log the gradient norm for this module
-            self.log(f"grad_norm/{name}", grad_norm, on_step=True, prog_bar=True)
+        return grad_norms
 
 
 class Pyramid(nn.Module):
@@ -454,11 +449,11 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
-    
+
     model = model.to(device)
     if eval_mode:
         model.eval()
-    
+
     # Only compile after loading and moving to device
     if torch.cuda.is_available():
         model = torch.compile(model)

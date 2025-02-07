@@ -51,7 +51,7 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 3e-4  # Standard PPO learning rate
+    learning_rate: float = 1.5e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.5  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -238,7 +238,7 @@ class SelfPlayTrainer:
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
-                self.network.on_after_backward()
+                grad_norms = self.network.on_after_backward()
                 fabric.clip_gradients(self.network, self.optimizer, max_norm=self.cfg.max_grad_norm)
                 self.optimizer.step()
 
@@ -249,6 +249,10 @@ class SelfPlayTrainer:
                 mean_policy_loss += pg_loss.mean().item()
                 mean_entropy_loss += entropy_loss.mean().item()
                 num_batches += 1
+
+                # Log gradient norms
+                for module_name, grad_norm in grad_norms.items():
+                    self.logger.log_metrics({f"/grad_norm/{module_name}": grad_norm})
 
                 # Update progress bar
                 pbar.set_postfix(
