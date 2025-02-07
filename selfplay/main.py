@@ -15,6 +15,8 @@ from generals.core.action import Action
 from network import load_network, Network
 
 
+torch.set_float32_matmul_precision("high")
+
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -252,7 +254,6 @@ class SelfPlayTrainer:
                 pbar.set_postfix(
                     {
                         "loss": f"{loss.item():.3f}",
-                        "returns": f"{returns.mean().item():.3f}",
                         "policy_loss": f"{pg_loss.mean().item():.3f}",
                         "entropy_loss": f"{entropy_loss.mean().item():.3f}",
                     }
@@ -271,7 +272,6 @@ class SelfPlayTrainer:
             self.logger.log_metrics(
                 {
                     "train/loss": mean_loss,
-                    "train/returns": mean_returns,
                     "train/ratio": mean_ratio,
                     "train/policy_loss": mean_policy_loss,
                     "train/entropy_loss": mean_entropy_loss,
@@ -369,22 +369,7 @@ class SelfPlayTrainer:
                     next_value = returns[t]
                     next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
 
-            # Flatten and prepare dataset for training
-            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
-            b_actions = self.actions[:, :, 0].reshape(-1, 5)
-            b_returns = returns[:, :, 0].reshape(-1)
-            b_logprobs = self.logprobs[:, :, 0].reshape(-1)
-            b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
 
-            dataset = {
-                "observations": b_obs,
-                "actions": b_actions,
-                "returns": b_returns,
-                "logprobs": b_logprobs,
-                "masks": b_masks,
-            }
-
-            self.train(self.fabric, dataset)
 
             # Calculate total rewards for each player
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
@@ -414,6 +399,23 @@ class SelfPlayTrainer:
                     "finished_games": finished_games,
                 }
             )
+
+            # Flatten and prepare dataset for training
+            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
+            b_actions = self.actions[:, :, 0].reshape(-1, 5)
+            b_returns = returns[:, :, 0].reshape(-1)
+            b_logprobs = self.logprobs[:, :, 0].reshape(-1)
+            b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
+
+            dataset = {
+                "observations": b_obs,
+                "actions": b_actions,
+                "returns": b_returns,
+                "logprobs": b_logprobs,
+                "masks": b_masks,
+            }
+
+            self.train(self.fabric, dataset)
 
         self.logger.close()
 
