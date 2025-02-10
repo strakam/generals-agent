@@ -42,7 +42,7 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 8
-    n_steps: int = 300
+    n_steps: int = 101
     batch_size: int = 64
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter

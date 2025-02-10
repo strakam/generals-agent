@@ -211,8 +211,8 @@ class Network(L.LightningModule):
         # Check if selected square was masked using square_mask
         square_mask_flat = square_mask.flatten(1)
         for idx in range(len(square)):
-            if square_mask_flat[idx, square[idx]] == -1e9:
-                i, j = square[idx] // 24, square[idx] % 24
+            if square_mask_flat[idx, square[idx].long()] < -1e9 - 10:
+                i, j = square[idx].long() // 24, square[idx].long() % 24
                 print(f"Warning: Agent picked masked square at position ({i}, {j})")
 
         # Get direction logits based on sampled square
@@ -242,7 +242,6 @@ class Network(L.LightningModule):
         action[action[:, 3] == 4, 0] = 1  # pass action
 
         return action, logprob, entropy
-
     def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
@@ -456,3 +455,4 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
         model = torch.compile(model)
 
     return model
+
