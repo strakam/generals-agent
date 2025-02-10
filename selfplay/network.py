@@ -67,10 +67,6 @@ class Network(L.LightningModule):
         self.register_buffer("mountains", torch.zeros(shape, device=device).bool())
         self.register_buffer("seen", torch.zeros(shape, device=device).bool())
         self.register_buffer("enemy_seen", torch.zeros(shape, device=device).bool())
-        self.register_buffer(
-            "last_observation",
-            torch.zeros((self.batch_size, self.n_channels, 24, 24), device=device),
-        )
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -86,7 +82,6 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
-            "last_observation",
         ]
 
         for attr in attributes_to_reset:
@@ -167,7 +162,6 @@ class Network(L.LightningModule):
         )
         army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
         augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
-        self.last_observation = augmented_obs
         return augmented_obs
 
     @torch.compile
@@ -214,6 +208,13 @@ class Network(L.LightningModule):
         else:
             square = action[:, 1] * 24 + action[:, 2]
 
+        # Check if selected square was masked using square_mask
+        square_mask_flat = square_mask.flatten(1)
+        for idx in range(len(square)):
+            if square_mask_flat[idx, square[idx]] == -1e9:
+                i, j = square[idx] // 24, square[idx] % 24
+                print(f"Warning: Agent picked masked square at position ({i}, {j})")
+
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
@@ -250,8 +251,6 @@ class Network(L.LightningModule):
         logprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self(obs, masks, actions)
-        if torch.any(newlogprobs <= -1e9):
-            print(newlogprobs)
         ratio = torch.exp(newlogprobs - logprobs)
 
         pg_loss1 = -returns * ratio
@@ -261,7 +260,7 @@ class Network(L.LightningModule):
         entropy_loss = entropy.mean()
         loss = pg_loss - args.ent_coef * entropy_loss
 
-        return loss, pg_loss, entropy_loss, ratio, returns
+        return loss, pg_loss, entropy_loss, ratio
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr

@@ -9,7 +9,7 @@ from lightning.fabric import Fabric
 from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import LandRewardFn, RewardFn, compute_num_generals_owned
+from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 from network import load_network, Network
@@ -209,7 +209,6 @@ class SelfPlayTrainer:
             drop_last=False,
         )
 
-        self.network.train()
         for epoch in range(1, self.cfg.n_epochs + 1):
             # Set epoch for distributed sampler
             if fabric.world_size > 1:
@@ -222,7 +221,7 @@ class SelfPlayTrainer:
                 batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
-                loss, pg_loss, entropy_loss, ratio, returns = self.network.training_step(batch, self.cfg)
+                loss, pg_loss, entropy_loss, ratio = self.network.training_step(batch, self.cfg)
 
                 # Check if ratios are 1.0 in first epoch and first batch
                 if epoch == 1 and batch_idx == 0:
