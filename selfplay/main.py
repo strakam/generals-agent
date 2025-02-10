@@ -56,7 +56,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "bf16-mixed"
+    precision: str = "32-true"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42

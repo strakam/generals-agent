@@ -45,9 +45,9 @@ class Network(L.LightningModule):
         self.direction_loss = nn.CrossEntropyLoss()
 
         if compile:
-            self.backbone = torch.compile(self.backbone, fullgraph=True)
-            self.square_head = torch.compile(self.square_head, fullgraph=True)
-            self.direction_head = torch.compile(self.direction_head, fullgraph=True)
+            self.backbone = torch.compile(self.backbone, fullgraph=True, dynamic=False)
+            self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
+            self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
 
     @torch.compile
     def reset(self):
