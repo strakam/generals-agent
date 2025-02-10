@@ -177,18 +177,19 @@ class SelfPlayTrainer:
         self.dones_shape = (cfg.n_steps, cfg.n_envs)
 
         with self.fabric.device:
-            self.obs = torch.zeros(self.obs_shape, dtype=torch.float32)
-            self.actions = torch.zeros(self.actions_shape, dtype=torch.float32)
-            self.logprobs = torch.zeros(self.logprobs_shape, dtype=torch.float32)
-            self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32)
-            self.dones = torch.zeros(self.dones_shape, dtype=torch.bool)
-            self.masks = torch.zeros(self.masks_shape, dtype=torch.bool)
+            device = self.fabric.device
+            self.obs = torch.zeros(self.obs_shape, dtype=torch.float32, device=device)
+            self.actions = torch.zeros(self.actions_shape, dtype=torch.float32, device=device)
+            self.logprobs = torch.zeros(self.logprobs_shape, dtype=torch.float32, device=device)
+            self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32, device=device)
+            self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
+            self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
 
     def train(self, fabric: Fabric, data: dict):
         """Train the network using PPO on collected rollout data."""
         # Get actual data size
         total_size = data["observations"].shape[0]
-        indices = torch.arange(total_size)
+        indices = torch.arange(total_size, device=self.fabric.device)
 
         effective_batch_size = min(self.cfg.batch_size, total_size)
 
@@ -222,6 +223,7 @@ class SelfPlayTrainer:
                 batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
+
                 loss, pg_loss, entropy_loss, ratio = self.network.training_step(batch, self.cfg)
 
                 # Check if ratios are 1.0 in first epoch and first batch
@@ -271,25 +273,35 @@ class SelfPlayTrainer:
         """
         with self.fabric.device:
             # Assume obs shape: (n_envs, 2, channels, 24, 24)
-            obs_tensor = torch.from_numpy(obs).to(self.fabric.device)
+            obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
 
             # Process masks.
             mask = [
-                torch.from_numpy(infos[agent_name][env_idx][4]).bool()
+                torch.from_numpy(infos[agent_name][env_idx][4]).to(self.fabric.device, non_blocking=True)
                 for env_idx in range(self.cfg.n_envs)
                 for agent_name in self.agent_names
             ]
-            mask = torch.stack(mask).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4).to(self.fabric.device)
+            mask = (
+                torch.stack(mask)
+                .reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
+                .to(self.fabric.device, non_blocking=True)
+            )
 
             # Process rewards.
             agent_rewards = []
             for agent_name in self.agent_names:
-                rewards_agent = torch.tensor([infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)])
+                rewards_agent = torch.tensor(
+                    [infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)],
+                    device=self.fabric.device,
+                )
                 agent_rewards.append(rewards_agent)
 
-            rewards = torch.stack(agent_rewards, dim=1).to(self.fabric.device)
+            rewards = torch.stack(agent_rewards, dim=1)
+
+            if self.fabric.device.type == "cuda":
+                torch.cuda.synchronize()  # Ensure all tensors are ready
 
         return augmented_obs, mask, rewards
 

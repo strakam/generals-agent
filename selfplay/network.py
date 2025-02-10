@@ -6,6 +6,7 @@ import lightning as L
 
 torch._dynamo.config.capture_scalar_outputs = True
 
+
 class Network(L.LightningModule):
     GRID_SIZE = 24
     DEFAULT_HISTORY_SIZE = 5
@@ -57,17 +58,20 @@ class Network(L.LightningModule):
         """
         shape = (self.batch_size, 24, 24)
         history_shape = (self.batch_size, self.history_size, 24, 24)
-        device = self.device  # or use: device = next(self.parameters()).device
+        device = self.device
 
         self.register_buffer("army_stack", torch.zeros(history_shape, device=device))
         self.register_buffer("enemy_stack", torch.zeros(history_shape, device=device))
         self.register_buffer("last_army", torch.zeros(shape, device=device))
         self.register_buffer("last_enemy_army", torch.zeros(shape, device=device))
-        self.register_buffer("cities", torch.zeros(shape, device=device).bool())
-        self.register_buffer("generals", torch.zeros(shape, device=device).bool())
-        self.register_buffer("mountains", torch.zeros(shape, device=device).bool())
-        self.register_buffer("seen", torch.zeros(shape, device=device).bool())
-        self.register_buffer("enemy_seen", torch.zeros(shape, device=device).bool())
+        self.register_buffer("cities", torch.zeros(shape, dtype=torch.bool, device=device))
+        self.register_buffer("generals", torch.zeros(shape, dtype=torch.bool, device=device))
+        self.register_buffer("mountains", torch.zeros(shape, dtype=torch.bool, device=device))
+        self.register_buffer("seen", torch.zeros(shape, dtype=torch.bool, device=device))
+        self.register_buffer("enemy_seen", torch.zeros(shape, dtype=torch.bool, device=device))
+
+        if device.type == "cuda":
+            torch.cuda.synchronize()  # Ensure buffers are fully initialized on GPU
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -450,12 +454,12 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
 
-    model = model.to(device)
+    model = model.to(device, non_blocking=True)
     if eval_mode:
         model.eval()
 
-    # if torch.cuda.is_available():
-    #     model = torch.compile(model)
-    model = torch.compile(model, fullgraph=True)
+    model = torch.compile(model, fullgraph=True, dynamic=False)
+    if device.type == "cuda":
+        torch.cuda.synchronize()  # Ensure model is fully loaded on GPU
 
     return model
