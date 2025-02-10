@@ -15,9 +15,6 @@ from generals.core.action import Action
 from network import load_network, Network
 
 
-torch.set_float32_matmul_precision("high")
-
-
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -59,6 +56,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
+    precision: str = "bf16-mixed"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -101,6 +99,7 @@ class NeptuneLogger:
                 "checkpoint_path": self.config.checkpoint_path,
                 "strategy": self.config.strategy,
                 "accelerator": self.config.accelerator,
+                "precision": self.config.precision,
                 "devices": self.config.devices,
             }
 
@@ -144,6 +143,7 @@ class SelfPlayTrainer:
             accelerator=cfg.accelerator,
             devices=cfg.devices,
             strategy=cfg.strategy,
+            precision=cfg.precision,
         )
         self.fabric.launch()
         self.fabric.seed_everything(cfg.seed)

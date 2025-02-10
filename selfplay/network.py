@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch.nn.functional import max_pool2d
 import lightning as L
 
+torch._dynamo.config.capture_scalar_outputs = True
 
 class Network(L.LightningModule):
     GRID_SIZE = 24
@@ -68,7 +69,6 @@ class Network(L.LightningModule):
         self.register_buffer("seen", torch.zeros(shape, device=device).bool())
         self.register_buffer("enemy_seen", torch.zeros(shape, device=device).bool())
 
-    @torch.compile
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
         timestep_mask = obs[:, 13, 0, 0] == 0.0
@@ -117,8 +117,8 @@ class Network(L.LightningModule):
         current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
 
         # Update history stacks by shifting and adding new differences
-        self.army_stack = torch.roll(self.army_stack, shifts=1, dims=1)
-        self.enemy_stack = torch.roll(self.enemy_stack, shifts=1, dims=1)
+        self.army_stack[:, 1:, :, :] = self.army_stack[:, :-1, :, :].clone()
+        self.enemy_stack[:, 1:, :, :] = self.enemy_stack[:, :-1, :, :].clone()
 
         self.army_stack[:, 0, :, :] = current_army - self.last_army
         self.enemy_stack[:, 0, :, :] = current_enemy_army - self.last_enemy_army
@@ -165,7 +165,6 @@ class Network(L.LightningModule):
         augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
         return augmented_obs
 
-    @torch.compile
     def normalize_observations(self, obs):
         timestep_normalize = 500
         army_normalize = 500
@@ -183,7 +182,6 @@ class Network(L.LightningModule):
 
         return obs
 
-    @torch.compile
     def prepare_masks(self, obs, direction_mask):
         square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
         direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
@@ -195,7 +193,7 @@ class Network(L.LightningModule):
 
         return square_mask, direction_mask
 
-    @torch.compile
+    @torch.compile(dynamic=False)
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
@@ -247,6 +245,7 @@ class Network(L.LightningModule):
 
         return action, logprob, entropy
 
+    @torch.compile
     def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
@@ -455,8 +454,8 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     if eval_mode:
         model.eval()
 
-    # Only compile after loading and moving to device
-    if torch.cuda.is_available():
-        model = torch.compile(model)
+    # if torch.cuda.is_available():
+    #     model = torch.compile(model)
+    model = torch.compile(model, fullgraph=True)
 
     return model
