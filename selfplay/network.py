@@ -277,7 +277,7 @@ class Network(L.LightningModule):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, fused=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
