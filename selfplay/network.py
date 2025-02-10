@@ -50,7 +50,7 @@ class Network(L.LightningModule):
             self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
 
-    @torch.compile
+    @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):
         """
         Reset the network's internal state.
@@ -92,7 +92,7 @@ class Network(L.LightningModule):
         for attr in attributes_to_reset:
             getattr(self, attr)[timestep_mask] = 0
 
-    @torch.compile
+    @torch.compile(dynamic=False, fullgraph=True)
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         """
         Here the network augments what it knows about the game with the new observation.
@@ -138,7 +138,7 @@ class Network(L.LightningModule):
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
 
-        ones = torch.ones((self.batch_size, 24, 24)).to(self.device)
+        ones = torch.ones((self.batch_size, 24, 24), device=self.device)
         channels = torch.stack(
             [
                 obs[:, armies, :, :],
@@ -169,6 +169,7 @@ class Network(L.LightningModule):
         augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
         return augmented_obs
 
+    @torch.compile(dynamic=False, fullgraph=True)
     def normalize_observations(self, obs):
         timestep_normalize = 500
         army_normalize = 500
@@ -186,18 +187,18 @@ class Network(L.LightningModule):
 
         return obs
 
+    @torch.compile(dynamic=False, fullgraph=True)
     def prepare_masks(self, obs, direction_mask):
         square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
         direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
-        pad_h = 24 - direction_mask.shape[2]
-        pad_w = 24 - direction_mask.shape[3]
-        mask = F.pad(direction_mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
-        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
+        B, C, h, w = direction_mask.shape
+        mask = torch.full((B, C, 24, 24), 1, device=self.device, dtype=direction_mask.dtype)
+        mask[:, :, :h, :w] = direction_mask
+        zero_layer = torch.zeros(B, 1, 24, 24, device=self.device)
         direction_mask = torch.cat((mask, zero_layer), dim=1) * -1e9
 
         return square_mask, direction_mask
 
-    @torch.compile(dynamic=False)
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
@@ -215,11 +216,11 @@ class Network(L.LightningModule):
             square = action[:, 1] * 24 + action[:, 2]
 
         # Check if selected square was masked using square_mask
-        square_mask_flat = square_mask.flatten(1)
-        for idx in range(len(square)):
-            if square_mask_flat[idx, square[idx].long()] < -1e9 - 10:
-                i, j = square[idx].long() // 24, square[idx].long() % 24
-                print(f"Warning: Agent picked masked square at position ({i}, {j})")
+        # square_mask_flat = square_mask.flatten(1)
+        # for idx in range(len(square)):
+        #     if square_mask_flat[idx, square[idx].long()] < -1e9 - 10:
+        #         i, j = square[idx].long() // 24, square[idx].long() % 24
+        #         print(f"Warning: Agent picked masked square at position ({i}, {j})")
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
@@ -249,7 +250,16 @@ class Network(L.LightningModule):
 
         return action, logprob, entropy
 
-    @torch.compile
+    @torch.compile(dynamic=False, fullgraph=True)
+    def calculate_loss(self, newlogprobs, entropy, returns, logprobs, args):
+        ratio = torch.exp(newlogprobs - logprobs)
+        pg_loss1 = -returns * ratio
+        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+        entropy_loss = entropy.mean()
+        loss = pg_loss - args.ent_coef * entropy_loss
+        return loss, pg_loss, entropy_loss, ratio
+
     def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
@@ -258,14 +268,8 @@ class Network(L.LightningModule):
         logprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self(obs, masks, actions)
-        ratio = torch.exp(newlogprobs - logprobs)
 
-        pg_loss1 = -returns * ratio
-        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-        entropy_loss = entropy.mean()
-        loss = pg_loss - args.ent_coef * entropy_loss
+        loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, entropy, returns, logprobs, args)
 
         return loss, pg_loss, entropy_loss, ratio
 
@@ -454,12 +458,9 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
 
-    model = model.to(device, non_blocking=True)
+    model = model.to(device)
     if eval_mode:
         model.eval()
 
     model = torch.compile(model, fullgraph=True, dynamic=False)
-    if device.type == "cuda":
-        torch.cuda.synchronize()  # Ensure model is fully loaded on GPU
-
     return model

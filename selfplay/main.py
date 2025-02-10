@@ -15,6 +15,8 @@ from generals.core.action import Action
 from network import load_network, Network
 
 
+TORCH_LOGS="recompiles"
+
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -226,6 +228,17 @@ class SelfPlayTrainer:
 
                 loss, pg_loss, entropy_loss, ratio = self.network.training_step(batch, self.cfg)
 
+                # Compute fraction of training samples that were clipped.
+                clip_low = 1.0 - self.cfg.clip_coef
+                clip_high = 1.0 + self.cfg.clip_coef
+                clipped_mask = (ratio < clip_low) | (ratio > clip_high)
+                clipfrac = clipped_mask.float().mean()  # fraction in [0,1]
+
+                # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
+                with torch.no_grad():
+                    logratio = torch.log(ratio)
+                    approx_kl = ((ratio - 1) - logratio).mean()
+
                 # Check if ratios are 1.0 in first epoch and first batch
                 if epoch == 1 and batch_idx == 0:
                     assert torch.allclose(
@@ -242,7 +255,7 @@ class SelfPlayTrainer:
                 for module_name, grad_norm in grad_norms.items():
                     self.logger.log_metrics({f"/grad_norm/{module_name}": grad_norm})
 
-                # Log metrics for this batch
+                # Log metrics for this batch, including the clipped fraction and approx_kl.
                 current_lr = self.optimizer.param_groups[0]["lr"]
                 self.logger.log_metrics(
                     {
@@ -251,6 +264,8 @@ class SelfPlayTrainer:
                         "train/ratio": ratio.mean().item(),
                         "train/policy_loss": pg_loss.mean().item(),
                         "train/entropy_loss": entropy_loss.mean().item(),
+                        "train/clipfrac": clipfrac.item(),
+                        "train/approx_kl": approx_kl.item(),
                     }
                 )
 
@@ -260,6 +275,8 @@ class SelfPlayTrainer:
                         "loss": f"{loss.item():.3f}",
                         "policy_loss": f"{pg_loss.mean().item():.3f}",
                         "entropy_loss": f"{entropy_loss.mean().item():.3f}",
+                        "clipfrac": f"{clipfrac.item():.3f}",
+                        "approx_kl": f"{approx_kl.item():.3f}",
                     }
                 )
 
@@ -368,8 +385,8 @@ class SelfPlayTrainer:
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()
 
-            # Count total number of games (steps * envs)
-            total_games = self.cfg.n_steps * self.cfg.n_envs
+            # Count total number of finished games
+            total_games = (torch.abs(self.rewards[:, :, 0]) == 1).sum().item() + 1
 
             # Calculate winrate (rewards are +1 for win, -1 for loss, 0 for incomplete)
             # So (reward + 1) / 2 converts from [-1,1] to [0,1] range for win rate
