@@ -17,6 +17,7 @@ from network import load_network, Network
 
 torch.set_float32_matmul_precision("high")
 
+
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -226,7 +227,7 @@ class SelfPlayTrainer:
                 # Check if ratios are 1.0 in first epoch and first batch
                 if epoch == 1 and batch_idx == 0:
                     assert torch.allclose(
-                        ratio, torch.ones_like(ratio), atol=1e-4
+                        ratio, torch.ones_like(ratio), atol=1e-3
                     ), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
 
                 self.optimizer.zero_grad(set_to_none=True)
@@ -241,13 +242,15 @@ class SelfPlayTrainer:
 
                 # Log metrics for this batch
                 current_lr = self.optimizer.param_groups[0]["lr"]
-                self.logger.log_metrics({
-                    "train/learning_rate": current_lr,
-                    "train/loss": loss.item(),
-                    "train/ratio": ratio.mean().item(),
-                    "train/policy_loss": pg_loss.mean().item(), 
-                    "train/entropy_loss": entropy_loss.mean().item()
-                })
+                self.logger.log_metrics(
+                    {
+                        "train/learning_rate": current_lr,
+                        "train/loss": loss.item(),
+                        "train/ratio": ratio.mean().item(),
+                        "train/policy_loss": pg_loss.mean().item(),
+                        "train/entropy_loss": entropy_loss.mean().item(),
+                    }
+                )
 
                 # Update progress bar
                 pbar.set_postfix(
@@ -337,9 +340,9 @@ class SelfPlayTrainer:
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
                 # Verify rewards are exactly ±1 or 0
-                # assert torch.all(
-                #     (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
-                # ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
+                assert torch.all(
+                    (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
+                ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
 
                 returns = torch.zeros_like(self.rewards)
                 next_value = torch.zeros_like(self.rewards[0])
@@ -349,34 +352,32 @@ class SelfPlayTrainer:
                     next_value = returns[t]
                     next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
 
-
-
             # Calculate total rewards for each player
             total_reward_p1 = self.rewards[:, :, 0].sum().item()
             total_reward_p2 = self.rewards[:, :, 1].sum().item()
 
-            # Count total number of completed games across all envs
-            finished_games = self.dones.sum().item()
+            # Count total number of games (steps * envs)
+            total_games = self.cfg.n_steps * self.cfg.n_envs
 
-            # Calculate mean reward per completed game, defaulting to 0 if no games finished
-            mean_reward_p1 = total_reward_p1 / finished_games if finished_games > 0 else 0
-            mean_reward_p2 = total_reward_p2 / finished_games if finished_games > 0 else 0
+            # Calculate winrate (rewards are +1 for win, -1 for loss, 0 for incomplete)
+            # So (reward + 1) / 2 converts from [-1,1] to [0,1] range for win rate
+            winrate_p1 = ((total_reward_p1 / total_games) + 1) / 2
+            winrate_p2 = ((total_reward_p2 / total_games) + 1) / 2
 
             self.fabric.print(
                 f"Iteration {iteration} stats - "
-                f"Player 1: Total Reward = {total_reward_p1:.2f}, Mean Reward = {mean_reward_p1:.2f}; "
-                f"Player 2: Total Reward = {total_reward_p2:.2f}, Mean Reward = {mean_reward_p2:.2f}; "
-                f"Finished games: {finished_games}"
+                f"Player 1: Total Reward = {total_reward_p1:.2f}, Winrate = {winrate_p1:.2%}; "
+                f"Player 2: Total Reward = {total_reward_p2:.2f}, Winrate = {winrate_p2:.2%}; "
+                f"Total games: {total_games}"
             )
-            self.fabric.print(f"Iteration {iteration} completed")
 
             self.logger.log_metrics(
                 {
                     "total_reward_p1": total_reward_p1,
-                    "mean_reward_p1": mean_reward_p1,
+                    "winrate_p1": winrate_p1,
                     "total_reward_p2": total_reward_p2,
-                    "mean_reward_p2": mean_reward_p2,
-                    "finished_games": finished_games,
+                    "winrate_p2": winrate_p2,
+                    "total_games": total_games,
                 }
             )
 

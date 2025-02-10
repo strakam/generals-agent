@@ -44,9 +44,9 @@ class Network(L.LightningModule):
         self.direction_loss = nn.CrossEntropyLoss()
 
         if compile:
-            self.backbone = torch.compile(self.backbone)
-            self.square_head = torch.compile(self.square_head)
-            self.direction_head = torch.compile(self.direction_head)
+            self.backbone = torch.compile(self.backbone, fullgraph=True)
+            self.square_head = torch.compile(self.square_head, fullgraph=True)
+            self.direction_head = torch.compile(self.direction_head, fullgraph=True)
 
     @torch.compile
     def reset(self):
@@ -68,6 +68,7 @@ class Network(L.LightningModule):
         self.register_buffer("seen", torch.zeros(shape, device=device).bool())
         self.register_buffer("enemy_seen", torch.zeros(shape, device=device).bool())
 
+    @torch.compile
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
         timestep_mask = obs[:, 13, 0, 0] == 0.0
@@ -170,14 +171,16 @@ class Network(L.LightningModule):
         army_normalize = 500
         land_normalize = 200
 
-        obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
-        obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
+        # Combine all army-related normalizations into one operation
+        # This includes: first 4 channels, army counts (18, 20), and history stacks (21+)
+        obs[:, [0, 1, 2, 3, 18, 20] + list(range(21, obs.shape[1])), :, :] /= army_normalize
 
-        obs[:, 18, :, :] = obs[:, 18, :, :] / army_normalize
-        obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
-        obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
-        obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-        obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
+        # Timestep normalization
+        obs[:, 14, :, :] /= timestep_normalize
+
+        # Land count normalization
+        obs[:, [17, 19], :, :] /= land_normalize
+
         return obs
 
     @torch.compile
@@ -192,6 +195,7 @@ class Network(L.LightningModule):
 
         return square_mask, direction_mask
 
+    @torch.compile
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
@@ -242,6 +246,7 @@ class Network(L.LightningModule):
         action[action[:, 3] == 4, 0] = 1  # pass action
 
         return action, logprob, entropy
+
     def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
@@ -455,4 +460,3 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
         model = torch.compile(model)
 
     return model
-
