@@ -22,7 +22,7 @@ class WinLoseRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        return float(1 * change_in_num_generals_owned)
+        return float(1 * change_in_num_generals_owned) - 0.01
 
 
 def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -51,10 +51,10 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.5e-4  # Standard PPO learning rate
-    max_grad_norm: float = 0.5  # Gradient clipping
+    learning_rate: float = 2.5e-4  # Standard PPO learning rate
+    max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.02  # Increased from 0.00 to encourage exploration
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -263,7 +263,7 @@ class SelfPlayTrainer:
                         "train/loss": loss.item(),
                         "train/ratio": ratio.mean().item(),
                         "train/policy_loss": pg_loss.mean().item(),
-                        "train/entropy_loss": entropy_loss.mean().item(),
+                        "train/entropy": entropy_loss.mean().item(),
                         "train/clipfrac": clipfrac.item(),
                         "train/approx_kl": approx_kl.item(),
                     }
@@ -274,7 +274,7 @@ class SelfPlayTrainer:
                     {
                         "loss": f"{loss.item():.3f}",
                         "policy_loss": f"{pg_loss.mean().item():.3f}",
-                        "entropy_loss": f"{entropy_loss.mean().item():.3f}",
+                        "entropy": f"{entropy_loss.mean().item():.3f}",
                         "clipfrac": f"{clipfrac.item():.3f}",
                         "approx_kl": f"{approx_kl.item():.3f}",
                     }
