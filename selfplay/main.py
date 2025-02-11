@@ -23,7 +23,7 @@ class WinLoseRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        return float(1 * change_in_num_generals_owned) - 0.01
+        return float(1 * change_in_num_generals_owned)
 
 
 def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -47,7 +47,7 @@ class SelfPlayConfig:
     batch_size: int = 64
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
-    grid_size: int = 4  # Already set to 4
+    grid_size: int = 5  # Already set to 4
     checkpoint_path: str = ""
 
     # PPO parameters
@@ -120,7 +120,7 @@ class NeptuneLogger:
 
 def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     dims = (config.grid_size, config.grid_size)
-    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(0, 0), (3, 3)])
+    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(1, 1), (4, 4)])
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -165,9 +165,8 @@ class SelfPlayTrainer:
         self.network.reset()
 
         # Create environment.
-        agent_names = ["1", "2"]
-        self.envs = create_environment(agent_names, cfg)
-        self.agent_names = agent_names
+        self.agent_names = ["1", "2"]
+        self.envs = create_environment(self.agent_names, cfg)
 
         # Setup expected tensor shapes for rollouts.
         self.n_agents = 2
@@ -332,6 +331,7 @@ class SelfPlayTrainer:
             next_obs, infos = self.envs.reset()
             next_obs, mask, _ = self.process_observations(next_obs, infos)
             next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
+            wins, draws, losses = 0, 0, 0
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
                 self.obs[step] = next_obs
@@ -366,14 +366,14 @@ class SelfPlayTrainer:
                 if any(dones):
                     for env_idx in range(self.cfg.n_envs):
                         if dones[env_idx]:
-                            p1_won = infos["player_1"][env_idx][3]
-                            p2_won = infos["player_2"][env_idx][3]
+                            p1_won = infos[self.agent_names[0]][env_idx][3]
+                            p2_won = infos[self.agent_names[1]][env_idx][3]
                             if p1_won:
-                                self.wins += 1
+                                wins += 1
                             elif p2_won:
-                                self.losses += 1
+                                losses += 1
                             else:
-                                self.draws += 1
+                                draws += 1
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
@@ -391,11 +391,11 @@ class SelfPlayTrainer:
                     next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
 
             # Calculate win/draw/loss percentages
-            total_games = self.wins + self.draws + self.losses
+            total_games = wins + draws + losses
             if total_games > 0:
-                win_rate = self.wins / total_games
-                draw_rate = self.draws / total_games
-                loss_rate = self.losses / total_games
+                win_rate = wins / total_games
+                draw_rate = draws / total_games
+                loss_rate = losses / total_games
             else:
                 win_rate = draw_rate = loss_rate = 0.0
 

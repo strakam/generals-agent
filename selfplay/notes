@@ -1,2 +1,7 @@
+Variance Reduction:
 - (return/advantage) normalization ?
-- log clipfracs, approx_kl and explained_variance
+- one value function that sees everything?
+- moving average instead of value function? Or average over minibatch?
+- Add KL divergence to loss? -> need to calculate it correctly because of more complex action space
+
+- Reward shaping - is it dangerous or lez go?
