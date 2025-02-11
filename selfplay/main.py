@@ -15,7 +15,8 @@ from generals.core.action import Action
 from network import load_network, Network
 
 
-TORCH_LOGS="recompiles"
+TORCH_LOGS = "recompiles"
+
 
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
@@ -357,14 +358,22 @@ class SelfPlayTrainer:
 
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
                 self.rewards[step] = step_rewards
-                # Print action-reward pairs for agent 0
-                # for env_idx in range(self.cfg.n_envs):
-                #     action = _actions[env_idx, 0]  # Get action for agent 0
-                #     reward = step_rewards[env_idx, 0].item()  # Get reward for agent 0
-                #     self.fabric.print(f"Env {env_idx} - Action: {action}, Reward: {reward}")
 
                 dones = np.logical_or(terminations, truncations)
                 next_done = torch.tensor(dones, device=self.fabric.device)
+
+                # Track game outcomes when episodes finish
+                if any(dones):
+                    for env_idx in range(self.cfg.n_envs):
+                        if dones[env_idx]:
+                            p1_won = infos["player_1"][env_idx][3]
+                            p2_won = infos["player_2"][env_idx][3]
+                            if p1_won:
+                                self.wins += 1
+                            elif p2_won:
+                                self.losses += 1
+                            else:
+                                self.draws += 1
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
@@ -381,31 +390,26 @@ class SelfPlayTrainer:
                     next_value = returns[t]
                     next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
 
-            # Calculate total rewards for each player
-            total_reward_p1 = self.rewards[:, :, 0].sum().item()
-            total_reward_p2 = self.rewards[:, :, 1].sum().item()
-
-            # Count total number of finished games
-            total_games = (torch.abs(self.rewards[:, :, 0]) == 1).sum().item() + 1
-
-            # Calculate winrate (rewards are +1 for win, -1 for loss, 0 for incomplete)
-            # So (reward + 1) / 2 converts from [-1,1] to [0,1] range for win rate
-            winrate_p1 = ((total_reward_p1 / total_games) + 1) / 2
-            winrate_p2 = ((total_reward_p2 / total_games) + 1) / 2
+            # Calculate win/draw/loss percentages
+            total_games = self.wins + self.draws + self.losses
+            if total_games > 0:
+                win_rate = self.wins / total_games
+                draw_rate = self.draws / total_games
+                loss_rate = self.losses / total_games
+            else:
+                win_rate = draw_rate = loss_rate = 0.0
 
             self.fabric.print(
                 f"Iteration {iteration} stats - "
-                f"Player 1: Total Reward = {total_reward_p1:.2f}, Winrate = {winrate_p1:.2%}; "
-                f"Player 2: Total Reward = {total_reward_p2:.2f}, Winrate = {winrate_p2:.2%}; "
+                f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
                 f"Total games: {total_games}"
             )
 
             self.logger.log_metrics(
                 {
-                    "total_reward_p1": total_reward_p1,
-                    "winrate_p1": winrate_p1,
-                    "total_reward_p2": total_reward_p2,
-                    "winrate_p2": winrate_p2,
+                    "win_rate": win_rate,
+                    "draw_rate": draw_rate,
+                    "loss_rate": loss_rate,
                     "total_games": total_games,
                 }
             )
