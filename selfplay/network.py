@@ -215,13 +215,6 @@ class Network(L.LightningModule):
         else:
             square = action[:, 1] * 24 + action[:, 2]
 
-        # Check if selected square was masked using square_mask
-        # square_mask_flat = square_mask.flatten(1)
-        # for idx in range(len(square)):
-        #     if square_mask_flat[idx, square[idx].long()] < -1e9 - 10:
-        #         i, j = square[idx].long() // 24, square[idx].long() % 24
-        #         print(f"Warning: Agent picked masked square at position ({i}, {j})")
-
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)

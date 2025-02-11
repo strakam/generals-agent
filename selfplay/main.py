@@ -15,9 +15,6 @@ from generals.core.action import Action
 from network import load_network, Network
 
 
-TORCH_LOGS = "recompiles"
-
-
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -120,7 +117,7 @@ class NeptuneLogger:
 
 def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     dims = (config.grid_size, config.grid_size)
-    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(1, 1), (4, 4)])
+    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(0, 0), (3, 3)])
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -430,6 +427,10 @@ class SelfPlayTrainer:
             }
 
             self.train(self.fabric, dataset)
+
+            print(torch.cuda.memory_summary(device="cpu"))
+            del dataset, b_obs, b_actions, b_returns, b_logprobs, b_masks
+            torch.cuda.empty_cache()
 
         self.logger.close()
 
