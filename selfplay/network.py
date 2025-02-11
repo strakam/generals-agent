@@ -214,13 +214,13 @@ class Network(L.LightningModule):
             square = square_dist.sample()
         else:
             square = action[:, 1] * 24 + action[:, 2]
+        i, j = square // 24, square % 24
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction += direction_mask
-        i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
         # Sample direction

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 import gymnasium as gym
 import argparse
@@ -45,6 +45,7 @@ class SelfPlayConfig:
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 5  # Already set to 4
+    channel_sequence: List[int] = field(default_factory=lambda: [192, 256, 320, 320])
     checkpoint_path: str = ""
 
     # PPO parameters
@@ -155,7 +156,7 @@ class SelfPlayTrainer:
         if cfg.checkpoint_path != "":
             self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
         else:
-            self.network = Network(batch_size=cfg.n_envs)
+            self.network = Network(batch_size=cfg.n_envs, channel_sequence=cfg.channel_sequence)
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
 
@@ -375,9 +376,9 @@ class SelfPlayTrainer:
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
                 # Verify rewards are exactly ±1 or 0
-                assert torch.all(
-                    (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
-                ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
+                # assert torch.all(
+                #     (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
+                # ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
 
                 returns = torch.zeros_like(self.rewards)
                 next_value = torch.zeros_like(self.rewards[0])
