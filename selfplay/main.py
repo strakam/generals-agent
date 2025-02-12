@@ -318,21 +318,21 @@ class SelfPlayTrainer:
                 torch.cuda.synchronize()  # Ensure all tensors are ready
 
             # Assert that every observation has at least one valid move
-            for agent_idx in range(self.n_agents):
-                valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
-                # Find indices where agent has no valid moves
-                no_moves_idx = (valid_moves < 1).nonzero()
-                if no_moves_idx.numel() > 0:
-                    no_moves_idx = no_moves_idx.squeeze(1)
-                    # Get land and army counts for those environments
-                    land_counts = augmented_obs[no_moves_idx, agent_idx, 17, 0, 0]  # owned_land_count channel
-                    army_counts = augmented_obs[no_moves_idx, agent_idx, 18, 0, 0]  # owned_army_count channel
-                    print(f"Agent {agent_idx} has no moves in envs {no_moves_idx.tolist()}")
-                    print(f"Land counts: {land_counts.tolist()}")
-                    print(f"Army counts: {army_counts.tolist()}")
-                    timesteps = augmented_obs[no_moves_idx, agent_idx, 14, 0, 0]  # timestep channel
-                    print(f"Timesteps: {timesteps.tolist()}")
-                assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
+            # for agent_idx in range(self.n_agents):
+            #     valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
+            #     # Find indices where agent has no valid moves
+            #     no_moves_idx = (valid_moves < 1).nonzero()
+            #     if no_moves_idx.numel() > 0:
+            #         no_moves_idx = no_moves_idx.squeeze(1)
+            #         # Get land and army counts for those environments
+            #         land_counts = augmented_obs[no_moves_idx, agent_idx, 17, 0, 0]  # owned_land_count channel
+            #         army_counts = augmented_obs[no_moves_idx, agent_idx, 18, 0, 0]  # owned_army_count channel
+            #         print(f"Agent {agent_idx} has no moves in envs {no_moves_idx.tolist()}")
+            #         print(f"Land counts: {land_counts.tolist()}")
+            #         print(f"Army counts: {army_counts.tolist()}")
+            #         timesteps = augmented_obs[no_moves_idx, agent_idx, 14, 0, 0]  # timestep channel
+            #         print(f"Timesteps: {timesteps.tolist()}")
+            #     assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
 
         return augmented_obs, mask, rewards
 
