@@ -16,3 +16,4 @@ TODOs:
 - checkpointing
 - eval vs OG
 - add shared memory for async env? 
+- try moving env.reset() outside

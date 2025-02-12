@@ -240,6 +240,12 @@ class Network(L.LightningModule):
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction += direction_mask
+        # Check for invalid i,j values
+        invalid_i = (i < 0) | (i > 23)
+        invalid_j = (j < 0) | (j > 23)
+        if invalid_i.any() or invalid_j.any():
+            print("Invalid i values:", i[invalid_i])
+            print("Invalid j values:", j[invalid_j])
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
         # Sample direction

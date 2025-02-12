@@ -40,7 +40,7 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 8
-    n_steps: int = 101
+    n_steps: int = 100
     batch_size: int = 64
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
@@ -57,7 +57,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "32-true"
+    precision: str = "16-mixed"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -248,6 +248,12 @@ class SelfPlayTrainer:
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
+
+                # Unscale the gradients before logging or clipping if using mixed precision.
+                if hasattr(fabric, "scaler") and fabric.scaler is not None:
+                    fabric.scaler.unscale_(self.optimizer)
+
+                # Now the gradients are in their true scale, ensuring that logging and clipping are applied correctly.
                 grad_norms = self.network.on_after_backward()
                 fabric.clip_gradients(self.network, self.optimizer, max_norm=self.cfg.max_grad_norm)
                 self.optimizer.step()
