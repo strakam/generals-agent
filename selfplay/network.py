@@ -219,9 +219,14 @@ class Network(L.LightningModule):
         square_mask_flat = square_mask.flatten(1)
         invalid_square = square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()] == -1e9
         if invalid_square.any():
+            print(f"Are actions None? {action is None}")
             print(square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()])
             print("and now logits of picked square")
             print(square_logits[torch.arange(square_logits.shape[0]), square.long()])
+            # Get positions where invalid squares were picked
+            invalid_positions = torch.where(invalid_square)[0]
+            print("Invalid positions:", invalid_positions)
+            print("Logits at invalid positions:", square_logits[invalid_positions, square[invalid_positions].long()])
             raise ValueError("Selected an invalid square that was masked")
 
         # Get direction logits based on sampled square
