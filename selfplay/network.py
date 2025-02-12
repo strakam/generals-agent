@@ -220,6 +220,8 @@ class Network(L.LightningModule):
         invalid_square = square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()] == -1e9
         if invalid_square.any():
             print(square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()])
+            print("and now logits of picked square")
+            print(square_logits[torch.arange(square_logits.shape[0]), square.long()])
             raise ValueError("Selected an invalid square that was masked")
 
         # Get direction logits based on sampled square
