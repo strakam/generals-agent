@@ -205,8 +205,8 @@ class Network(L.LightningModule):
 
         representation = self.backbone(obs)
 
-        square_logits = self.square_head(representation)
-        square_logits = (square_logits + square_mask).flatten(1)
+        square_logits_unmasked = self.square_head(representation)
+        square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
         # Sample square from categorical distribution
         square_dist = torch.distributions.Categorical(logits=square_logits)
@@ -223,6 +223,8 @@ class Network(L.LightningModule):
             print(square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()])
             print("and now logits of picked square")
             print(square_logits[torch.arange(square_logits.shape[0]), square.long()])
+            print("and now logits of unmasked square")
+            print(square_logits_unmasked[torch.arange(square_logits_unmasked.shape[0]), square.long()])
             # Get positions where invalid squares were picked
             invalid_positions = torch.where(invalid_square)[0]
             print("Invalid positions:", invalid_positions)
