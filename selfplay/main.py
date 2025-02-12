@@ -291,7 +291,10 @@ class SelfPlayTrainer:
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
-
+            # Assert that every observation has at least one valid move
+            for agent_idx in range(self.n_agents):
+                valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
+                assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
             # Process masks.
             mask = [
                 torch.from_numpy(infos[agent_name][env_idx][4]).to(self.fabric.device, non_blocking=True)
