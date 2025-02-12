@@ -45,7 +45,7 @@ class SelfPlayConfig:
     n_epochs: int = 2
     truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 5  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [192, 256, 320, 320])
+    channel_sequence: List[int] = field(default_factory=lambda: [64, 128, 192, 192])
     checkpoint_path: str = ""
 
     # PPO parameters
@@ -130,6 +130,7 @@ def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.ve
             )
             for _ in range(config.n_envs)
         ],
+        shared_memory=True
     )
 
 
@@ -157,6 +158,8 @@ class SelfPlayTrainer:
             self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
         else:
             self.network = Network(batch_size=cfg.n_envs, channel_sequence=cfg.channel_sequence)
+            n_params = sum(p.numel() for p in self.network.parameters())
+            print(f"Number of parameters: {n_params:,}")
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
 
