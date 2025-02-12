@@ -200,6 +200,11 @@ class Network(L.LightningModule):
         return square_mask, direction_mask
 
     def forward(self, obs, mask, action=None):
+        # Add early validation
+        valid_moves = obs[:, 10, :, :].sum(dim=(1,2))
+        if (valid_moves == 0).any():
+            print("No valid moves available for some batch elements")
+        
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
@@ -229,6 +234,10 @@ class Network(L.LightningModule):
             invalid_positions = torch.where(invalid_square)[0]
             print("Invalid positions:", invalid_positions)
             print("Logits at invalid positions:", square_logits[invalid_positions, square[invalid_positions].long()])
+            # Print number of unmasked cells for positions where invalid squares were picked
+            for pos in invalid_positions:
+                num_unmasked = (square_mask_flat[pos] != -1e9).sum().item()
+                print(f"Position {pos} had {num_unmasked} unmasked squares available")
             raise ValueError("Selected an invalid square that was masked")
 
         # Get direction logits based on sampled square
