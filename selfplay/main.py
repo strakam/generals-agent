@@ -321,8 +321,9 @@ class SelfPlayTrainer:
             for agent_idx in range(self.n_agents):
                 valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
                 # Find indices where agent has no valid moves
-                no_moves_idx = (valid_moves < 1).nonzero().squeeze()
-                if len(no_moves_idx) > 0:
+                no_moves_idx = (valid_moves < 1).nonzero()
+                if no_moves_idx.numel() > 0:
+                    no_moves_idx = no_moves_idx.squeeze(1)
                     # Get land and army counts for those environments
                     land_counts = augmented_obs[no_moves_idx, agent_idx, 17, 0, 0]  # owned_land_count channel
                     army_counts = augmented_obs[no_moves_idx, agent_idx, 18, 0, 0]  # owned_army_count channel
@@ -428,21 +429,21 @@ class SelfPlayTrainer:
             )
 
             # Flatten and prepare dataset for training
-            # b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
-            # b_actions = self.actions[:, :, 0].reshape(-1, 5)
-            # b_returns = returns[:, :, 0].reshape(-1)
-            # b_logprobs = self.logprobs[:, :, 0].reshape(-1)
-            # b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
+            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
+            b_actions = self.actions[:, :, 0].reshape(-1, 5)
+            b_returns = returns[:, :, 0].reshape(-1)
+            b_logprobs = self.logprobs[:, :, 0].reshape(-1)
+            b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
 
-            # dataset = {
-            #     "observations": b_obs,
-            #     "actions": b_actions,
-            #     "returns": b_returns,
-            #     "logprobs": b_logprobs,
-            #     "masks": b_masks,
-            # }
+            dataset = {
+                "observations": b_obs,
+                "actions": b_actions,
+                "returns": b_returns,
+                "logprobs": b_logprobs,
+                "masks": b_masks,
+            }
 
-            # self.train(self.fabric, dataset)
+            self.train(self.fabric, dataset)
 
         self.logger.close()
 
