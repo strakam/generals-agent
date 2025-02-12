@@ -291,10 +291,6 @@ class SelfPlayTrainer:
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
-            # Assert that every observation has at least one valid move
-            for agent_idx in range(self.n_agents):
-                valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
-                assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
             # Process masks.
             mask = [
                 torch.from_numpy(infos[agent_name][env_idx][4]).to(self.fabric.device, non_blocking=True)
@@ -320,6 +316,22 @@ class SelfPlayTrainer:
 
             if self.fabric.device.type == "cuda":
                 torch.cuda.synchronize()  # Ensure all tensors are ready
+
+            # Assert that every observation has at least one valid move
+            for agent_idx in range(self.n_agents):
+                valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
+                # Find indices where agent has no valid moves
+                no_moves_idx = (valid_moves < 1).nonzero().squeeze()
+                if len(no_moves_idx) > 0:
+                    # Get land and army counts for those environments
+                    land_counts = augmented_obs[no_moves_idx, agent_idx, 17, 0, 0]  # owned_land_count channel
+                    army_counts = augmented_obs[no_moves_idx, agent_idx, 18, 0, 0]  # owned_army_count channel
+                    print(f"Agent {agent_idx} has no moves in envs {no_moves_idx.tolist()}")
+                    print(f"Land counts: {land_counts.tolist()}")
+                    print(f"Army counts: {army_counts.tolist()}")
+                    timesteps = augmented_obs[no_moves_idx, agent_idx, 14, 0, 0]  # timestep channel
+                    print(f"Timesteps: {timesteps.tolist()}")
+                assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
 
         return augmented_obs, mask, rewards
 
@@ -416,21 +428,21 @@ class SelfPlayTrainer:
             )
 
             # Flatten and prepare dataset for training
-            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
-            b_actions = self.actions[:, :, 0].reshape(-1, 5)
-            b_returns = returns[:, :, 0].reshape(-1)
-            b_logprobs = self.logprobs[:, :, 0].reshape(-1)
-            b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
+            # b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
+            # b_actions = self.actions[:, :, 0].reshape(-1, 5)
+            # b_returns = returns[:, :, 0].reshape(-1)
+            # b_logprobs = self.logprobs[:, :, 0].reshape(-1)
+            # b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
 
-            dataset = {
-                "observations": b_obs,
-                "actions": b_actions,
-                "returns": b_returns,
-                "logprobs": b_logprobs,
-                "masks": b_masks,
-            }
+            # dataset = {
+            #     "observations": b_obs,
+            #     "actions": b_actions,
+            #     "returns": b_returns,
+            #     "logprobs": b_logprobs,
+            #     "masks": b_masks,
+            # }
 
-            self.train(self.fabric, dataset)
+            # self.train(self.fabric, dataset)
 
         self.logger.close()
 
