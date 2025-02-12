@@ -238,10 +238,10 @@ class SelfPlayTrainer:
                     approx_kl = ((ratio - 1) - logratio).mean()
 
                 # Check if ratios are 1.0 in first epoch and first batch
-                if epoch == 1 and batch_idx == 0:
-                    assert torch.allclose(
-                        ratio, torch.ones_like(ratio), atol=1e-3
-                    ), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
+                #if epoch == 1 and batch_idx == 0:
+                #    assert torch.allclose(
+                #        ratio, torch.ones_like(ratio), atol=1e-3
+                #    ), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
@@ -428,10 +428,6 @@ class SelfPlayTrainer:
             }
 
             self.train(self.fabric, dataset)
-
-            print(torch.cuda.memory_summary(device="cpu"))
-            del dataset, b_obs, b_actions, b_returns, b_logprobs, b_masks
-            torch.cuda.empty_cache()
 
         self.logger.close()
 

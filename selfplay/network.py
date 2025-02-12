@@ -215,6 +215,12 @@ class Network(L.LightningModule):
         else:
             square = action[:, 1] * 24 + action[:, 2]
         i, j = square // 24, square % 24
+        # Check if picked square was masked
+        square_mask_flat = square_mask.flatten(1)
+        invalid_square = square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()] == -1e9
+        if invalid_square.any():
+            print(square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()])
+            raise ValueError("Selected an invalid square that was masked")
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
@@ -270,7 +276,7 @@ class Network(L.LightningModule):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, fused=True)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
