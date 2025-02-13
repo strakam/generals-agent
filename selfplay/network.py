@@ -171,9 +171,9 @@ class Network(L.LightningModule):
 
     @torch.compile(dynamic=False, fullgraph=True)
     def normalize_observations(self, obs):
-        timestep_normalize = 500
-        army_normalize = 500
-        land_normalize = 200
+        timestep_normalize = 100
+        army_normalize = 50
+        land_normalize = 25
 
         # Combine all army-related normalizations into one operation
         # This includes: first 4 channels, army counts (18, 20), and history stacks (21+)

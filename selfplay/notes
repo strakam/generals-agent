@@ -18,3 +18,4 @@ TODOs:
 - eval vs OG
 - add shared memory for async env? 
 - try moving env.reset() outside
+- revert normalization as now i use experimental one

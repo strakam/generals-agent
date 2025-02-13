@@ -21,7 +21,7 @@ class WinLoseRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        return float(1 * change_in_num_generals_owned)
+        return float(1 * change_in_num_generals_owned) - 0.002
 
 
 def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -46,7 +46,7 @@ class SelfPlayConfig:
     n_epochs: int = 4
     truncation: int = 199  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 5  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [64, 64, 128, 128])
+    channel_sequence: List[int] = field(default_factory=lambda: [32, 64, 64, 96])
     repeats: List[int] = field(default_factory=lambda: [2, 1, 1, 1])
     checkpoint_path: str = ""
     
@@ -56,7 +56,7 @@ class SelfPlayConfig:
     
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 2.5e-4  # Standard PPO learning rate
+    learning_rate: float = 1.5e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.02  # Increased from 0.00 to encourage exploration
@@ -114,7 +114,7 @@ class NeptuneLogger:
         """Logs a batch of metrics to Neptune."""
         if self.fabric.is_global_zero:
             for key, value in metrics.items():
-                self.run[f"metrics/{key}"].log(value)
+                self.run[f"{key}"].log(value)
 
     def close(self):
         """Close the Neptune run."""
@@ -302,10 +302,11 @@ class SelfPlayTrainer:
             rewards: (n_envs, n_agents)
         """
         with self.fabric.device:
-            # Assume obs shape: (n_envs, 2, channels, 24, 24)
+            # Process observations. 
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
+
             # Process masks.
             mask = [
                 torch.from_numpy(infos[agent_name][env_idx][4]).to(self.fabric.device, non_blocking=True)
@@ -326,7 +327,6 @@ class SelfPlayTrainer:
                     device=self.fabric.device,
                 )
                 agent_rewards.append(rewards_agent)
-
             rewards = torch.stack(agent_rewards, dim=1)
 
             if self.fabric.device.type == "cuda":
@@ -344,7 +344,7 @@ class SelfPlayTrainer:
         next_obs, mask, _ = self.process_observations(next_obs, infos)
         
         with torch.no_grad():
-            for step in range(self.cfg.eval_steps):
+            for _ in range(self.cfg.eval_steps):
                 total_steps += self.cfg.n_envs
                 
                 # Get actions using predict method for player 1
