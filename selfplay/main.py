@@ -49,7 +49,11 @@ class SelfPlayConfig:
     channel_sequence: List[int] = field(default_factory=lambda: [64, 64, 128, 128])
     repeats: List[int] = field(default_factory=lambda: [2, 1, 1, 1])
     checkpoint_path: str = ""
-
+    
+    # Evaluation parameters
+    eval_interval: int = 5  # Run evaluation every N iterations
+    eval_steps: int = 200  # Number of steps to run during evaluation
+    
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     learning_rate: float = 2.5e-4  # Standard PPO learning rate
@@ -328,24 +332,79 @@ class SelfPlayTrainer:
             if self.fabric.device.type == "cuda":
                 torch.cuda.synchronize()  # Ensure all tensors are ready
 
-            # Assert that every observation has at least one valid move
-            # for agent_idx in range(self.n_agents):
-            #     valid_moves = augmented_obs[:, agent_idx, 10, :, :].sum(dim=(1, 2))
-            #     # Find indices where agent has no valid moves
-            #     no_moves_idx = (valid_moves < 1).nonzero()
-            #     if no_moves_idx.numel() > 0:
-            #         no_moves_idx = no_moves_idx.squeeze(1)
-            #         # Get land and army counts for those environments
-            #         land_counts = augmented_obs[no_moves_idx, agent_idx, 17, 0, 0]  # owned_land_count channel
-            #         army_counts = augmented_obs[no_moves_idx, agent_idx, 18, 0, 0]  # owned_army_count channel
-            #         print(f"Agent {agent_idx} has no moves in envs {no_moves_idx.tolist()}")
-            #         print(f"Land counts: {land_counts.tolist()}")
-            #         print(f"Army counts: {army_counts.tolist()}")
-            #         timesteps = augmented_obs[no_moves_idx, agent_idx, 14, 0, 0]  # timestep channel
-            #         print(f"Timesteps: {timesteps.tolist()}")
-            #     assert (valid_moves >= 1).all(), f"Agent {agent_idx} has no valid moves in some environments. Valid move counts: {valid_moves}"
-
         return augmented_obs, mask, rewards
+
+    def evaluate(self):
+        """Run evaluation using the predict method."""
+        self.network.eval()  # Set network to evaluation mode
+        wins, draws, losses = 0, 0, 0
+        total_steps = 0
+        
+        next_obs, infos = self.envs.reset()
+        next_obs, mask, _ = self.process_observations(next_obs, infos)
+        
+        with torch.no_grad():
+            for step in range(self.cfg.eval_steps):
+                total_steps += self.cfg.n_envs
+                
+                # Get actions using predict method for player 1
+                player1_obs = next_obs[:, 0]
+                player1_mask = mask[:, 0]
+                player1_actions = self.network.predict(player1_obs, player1_mask)
+                
+                # Generate random actions for player 2
+                player2_actions, _ = generate_random_action(self.cfg.n_envs, self.fabric.device)
+                
+                # Combine actions
+                actions = torch.stack([player1_actions, player2_actions], dim=1)
+                
+                # Step the environment
+                _actions = actions.cpu().numpy().astype(int)
+                next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
+                next_obs, mask, _ = self.process_observations(next_obs, infos)
+                
+                # Track outcomes
+                dones = np.logical_or(terminations, truncations)
+                if any(dones):
+                    for env_idx in range(self.cfg.n_envs):
+                        if dones[env_idx]:
+                            p1_won = infos[self.agent_names[0]][env_idx][3]
+                            p2_won = infos[self.agent_names[1]][env_idx][3]
+                            if p1_won:
+                                wins += 1
+                            elif p2_won:
+                                losses += 1
+                            else:
+                                draws += 1
+        
+        self.network.train()  # Set network back to training mode
+        
+        # Calculate rates
+        total_games = wins + draws + losses
+        if total_games > 0:
+            win_rate = wins / total_games
+            draw_rate = draws / total_games
+            loss_rate = losses / total_games
+        else:
+            win_rate = draw_rate = loss_rate = 0.0
+            
+        self.fabric.print(
+            f"Evaluation stats - "
+            f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
+            f"Total games: {total_games}"
+        )
+        
+        # Log evaluation metrics
+        self.logger.log_metrics(
+            {
+                "eval/win_rate": win_rate,
+                "eval/draw_rate": draw_rate,
+                "eval/loss_rate": loss_rate,
+                "eval/total_games": total_games,
+            }
+        )
+        
+        return win_rate, draw_rate, loss_rate
 
     def run(self):
         """Runs the main training loop."""
@@ -357,6 +416,11 @@ class SelfPlayTrainer:
             next_obs, mask, _ = self.process_observations(next_obs, infos)
             next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
             wins, draws, losses = 0, 0, 0
+            
+            # Run evaluation if it's time
+            if iteration % self.cfg.eval_interval == 0:
+                self.evaluate()
+            
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
                 self.obs[step] = next_obs

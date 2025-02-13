@@ -266,11 +266,44 @@ class Network(L.LightningModule):
 
         return loss, pg_loss, entropy_loss, ratio
 
+
+    @torch.compile(dynamic=False, fullgraph=True)
+    def predict(self, obs, mask):
+        obs = self.normalize_observations(obs.float())
+        square_mask, direction_mask = self.prepare_masks(obs, mask.float())
+
+        representation = self.backbone(obs)
+
+        # Get square logits and apply mask
+        square_logits_unmasked = self.square_head(representation)
+        square_logits = (square_logits_unmasked + square_mask).flatten(1)
+        
+        # Use argmax instead of sampling
+        square = square_logits.argmax(dim=1)
+        i, j = square // 24, square % 24
+
+        # Get direction logits based on selected square
+        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
+        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
+        direction = self.direction_head(representation_with_square)
+        direction += direction_mask
+        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
+
+        # Use argmax for direction
+        direction = direction.argmax(dim=1)
+
+        # Create action tensor with shape [batch_size, 5]
+        zeros = torch.zeros_like(square, dtype=torch.float)
+        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
+        action[action[:, 3] == 4, 0] = 1  # pass action
+
+        return action
+
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, eps=1e-07)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
@@ -455,5 +488,5 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     if eval_mode:
         model.eval()
 
-    model = torch.compile(model)#, fullgraph=True, dynamic=False)
+    model = torch.compile(model, fullgraph=True, dynamic=False)
     return model
