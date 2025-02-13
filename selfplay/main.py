@@ -60,6 +60,7 @@ class SelfPlayConfig:
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.02  # Increased from 0.00 to encourage exploration
+    target_kl: float = 0.02  # Target KL divergence
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -246,12 +247,6 @@ class SelfPlayTrainer:
                     logratio = torch.log(ratio)
                     approx_kl = ((ratio - 1) - logratio).mean()
 
-                # Check if ratios are 1.0 in first epoch and first batch
-                #if epoch == 1 and batch_idx == 0:
-                #    assert torch.allclose(
-                #        ratio, torch.ones_like(ratio), atol=1e-3
-                #    ), f"Ratios should be 1.0 in first epoch and batch, {ratio}"
-
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
 
@@ -292,6 +287,9 @@ class SelfPlayTrainer:
                         "approx_kl": f"{approx_kl.item():.3f}",
                     }
                 )
+
+            if approx_kl > self.cfg.target_kl:
+                break
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
