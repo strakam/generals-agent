@@ -14,6 +14,7 @@ from generals.core.observation import Observation
 from generals.core.action import Action
 from network import load_network, Network
 
+torch.set_float32_matmul_precision("medium")
 
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
@@ -39,13 +40,14 @@ def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 8
-    n_steps: int = 100
-    batch_size: int = 64
-    n_epochs: int = 2
-    truncation: int = 100  # Reduced from 1500 since 4x4 games should be shorter
+    n_envs: int = 768
+    n_steps: int = 200
+    batch_size: int = 768
+    n_epochs: int = 4
+    truncation: int = 200  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 5  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [64, 128, 192, 192])
+    channel_sequence: List[int] = field(default_factory=lambda: [64, 64, 128, 128])
+    repeats: List[int] = field(default_factory=lambda: [2, 1, 1, 1])
     checkpoint_path: str = ""
 
     # PPO parameters
@@ -57,7 +59,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "16-mixed"
+    precision: str = "32-true"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -157,7 +159,7 @@ class SelfPlayTrainer:
         if cfg.checkpoint_path != "":
             self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
         else:
-            self.network = Network(batch_size=cfg.n_envs, channel_sequence=cfg.channel_sequence)
+            self.network = Network(batch_size=cfg.n_envs, channel_sequence=cfg.channel_sequence, repeats=cfg.repeats)
             n_params = sum(p.numel() for p in self.network.parameters())
             print(f"Number of parameters: {n_params:,}")
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)

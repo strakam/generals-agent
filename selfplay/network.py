@@ -240,12 +240,6 @@ class Network(L.LightningModule):
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction += direction_mask
-        # Check for invalid i,j values
-        invalid_i = (i < 0) | (i > 23)
-        invalid_j = (j < 0) | (j > 23)
-        if invalid_i.any() or invalid_j.any():
-            print("Invalid i values:", i[invalid_i])
-            print("Invalid j values:", j[invalid_j])
         direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
 
         # Sample direction
@@ -329,7 +323,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 256 if stage_channels == [] else stage_channels[0]
+        first_channels = 192 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
