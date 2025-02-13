@@ -27,7 +27,7 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(h * w, 1),
-            Lambda(lambda x: 2.0 * torch.tanh(x)),  # Scale up tanh
+            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
         )
 
         self.square_head = nn.Sequential(
@@ -83,7 +83,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        # value = self.value_head(x)
+        value = self.value_head(x)
 
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
@@ -100,7 +100,7 @@ class Network(L.LightningModule):
 
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return square_logits, direction
+        return square_logits, direction, value
 
     def training_step(self, batch, batch_idx):
         obs, mask, values, actions = batch
@@ -108,15 +108,14 @@ class Network(L.LightningModule):
         target_j = actions[:, 2]
         target_cell = target_i * 24 + target_j
 
-        square, direction = self(obs, mask, target_cell)
+        square_logits, direction, values_pred = self(obs, mask, target_cell)
 
-        square_loss = self.square_loss(square, target_cell.long())
+        square_loss = self.square_loss(square_logits, target_cell.long())
         direction_loss = self.direction_loss(direction, actions[:, 3])
-        # value_loss = self.value_loss(value.flatten(), values)
+        value_loss = self.value_loss(values_pred.flatten(), values)
 
-        loss = square_loss + direction_loss
-        # loss
-        # self.log("value_loss", value_loss, on_step=True, prog_bar=True)
+        loss = square_loss + direction_loss + value_loss
+        self.log("value_loss", value_loss, on_step=True, prog_bar=True)
         self.log("square_loss", square_loss, on_step=True, prog_bar=True)
         self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
         self.log("loss", loss, on_step=True, prog_bar=True)

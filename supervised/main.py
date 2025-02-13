@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import os
 import torch
@@ -18,13 +18,15 @@ class TrainingConfig:
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
     buffer_size: int = 18000
-    batch_size: int = 2048
+    batch_size: int = 1024
     n_workers: int = 32
     # Training parameters
     learning_rate: float = 2e-4
     n_epochs: int = 16
     clip_val: float = 2.0
     seed: int = 42
+    channel_sequence: list[int] = field(default_factory=lambda: [192, 224, 256, 256])
+    repeats: list[int] = field(default_factory=lambda: [2, 2, 1, 1])
 
     # Logging and checkpointing
     log_every_n_steps: int = 20
@@ -108,7 +110,6 @@ class TrainingModule:
         )
 
 
-
 def main():
     # Initialize configuration
     config = TrainingConfig()
@@ -130,7 +131,10 @@ def main():
         model.load_state_dict(state_dict)
         trainer.fit(model, train_dataloaders=dataloader)
     else:
-        model = Network(lr=config.learning_rate, compile=True)
+        model = Network(
+            lr=config.learning_rate, channel_sequence=config.channel_sequence, repeats=config.repeats, compile=True
+        )
+        print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
         trainer.fit(model, train_dataloaders=dataloader)
 
 
