@@ -441,6 +441,15 @@ class SelfPlayTrainer:
                     self.logprobs[step, :, 0] = player1_logprobs
                     self.logprobs[step, :, 1] = player2_logprobs
 
+                    # Log mean probability and stddev per step for player 1
+                    probs = torch.exp(player1_logprobs)
+                    mean_prob = probs.mean().item()
+                    std_prob = probs.std().item()
+                    self.logger.log_metrics({
+                        "step_mean_prob": mean_prob,
+                        "step_std_prob": std_prob,
+                    })
+
                 # Step the environment.
                 _actions = self.actions[step].cpu().numpy().astype(int)
                 next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
