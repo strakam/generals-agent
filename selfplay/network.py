@@ -215,25 +215,6 @@ class Network(L.LightningModule):
         else:
             square = action[:, 1] * 24 + action[:, 2]
         i, j = square // 24, square % 24
-        # Check if picked square was masked
-        # square_mask_flat = square_mask.flatten(1)
-        # invalid_square = square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()] == -1e9
-        # if invalid_square.any():
-        #     print(f"Are actions None? {action is None}")
-        #     print(square_mask_flat[torch.arange(square_mask_flat.shape[0]), square.long()])
-        #     print("and now logits of picked square")
-        #     print(square_logits[torch.arange(square_logits.shape[0]), square.long()])
-        #     print("and now logits of unmasked square")
-        #     print(square_logits_unmasked[torch.arange(square_logits_unmasked.shape[0]), square.long()])
-        #     # Get positions where invalid squares were picked
-        #     invalid_positions = torch.where(invalid_square)[0]
-        #     print("Invalid positions:", invalid_positions)
-        #     print("Logits at invalid positions:", square_logits[invalid_positions, square[invalid_positions].long()])
-        #     # Print number of unmasked cells for positions where invalid squares were picked
-        #     for pos in invalid_positions:
-        #         num_unmasked = (square_mask_flat[pos] != -1e9).sum().item()
-        #         print(f"Position {pos} had {num_unmasked} unmasked squares available")
-        #     raise ValueError("Selected an invalid square that was masked")
 
         # Get direction logits based on sampled square
         square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
@@ -323,7 +304,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 192 if stage_channels == [] else stage_channels[0]
+        first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -474,5 +455,5 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     if eval_mode:
         model.eval()
 
-    model = torch.compile(model, fullgraph=True, dynamic=False)
+    model = torch.compile(model)#, fullgraph=True, dynamic=False)
     return model

@@ -44,7 +44,7 @@ class SelfPlayConfig:
     n_steps: int = 200
     batch_size: int = 768
     n_epochs: int = 4
-    truncation: int = 200  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 199  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 5  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [64, 64, 128, 128])
     repeats: List[int] = field(default_factory=lambda: [2, 1, 1, 1])
@@ -382,6 +382,12 @@ class SelfPlayTrainer:
                 next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
 
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
+                
+                # If game is truncated, player 1 gets -1 reward
+                for env_idx in range(self.cfg.n_envs):
+                    if truncations[env_idx]:
+                        step_rewards[env_idx, 0] = -1.0
+                
                 self.rewards[step] = step_rewards
 
                 dones = np.logical_or(terminations, truncations)
