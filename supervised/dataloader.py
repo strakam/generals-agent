@@ -27,9 +27,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         self.buffer_idx, self.replay_idx = 0, 0
         self.filled = False
 
-    def check_validity(
-        self, obs: np.ndarray, mask: np.ndarray, action: np.ndarray, stars: int
-    ) -> bool:
+    def check_validity(self, obs: np.ndarray, mask: np.ndarray, action: np.ndarray, stars: int) -> bool:
         """
         Check if an action is valid and from a high-rated player.
         """
@@ -45,10 +43,14 @@ class ReplayDataset(torch.utils.data.IterableDataset):
 
         return is_high_rated and (is_passing or is_valid_move)
 
-    def save_sample(self, obs, mask, value, action):
+    def save_sample(self, obs, mask, value, action, timestep, game_length):
+        # Calculate discounted value based on game progress
+        progress = timestep / game_length
+        discounted_value = value * progress  # Linear discount from 0 to final value
+
         self.buffer[self.buffer_idx][0][:] = obs
         self.buffer[self.buffer_idx][1][:] = mask
-        self.buffer[self.buffer_idx][2] = value
+        self.buffer[self.buffer_idx][2] = discounted_value  # Use discounted value
         self.buffer[self.buffer_idx][3][:] = action
         self.buffer_idx += 1
         if self.buffer_idx == len(self.buffer):
@@ -91,12 +93,8 @@ class ReplayDataset(torch.utils.data.IterableDataset):
                 agent_mask = compute_valid_move_mask(obs[agent_id])
 
                 # Save valid samples
-                if (
-                    self.check_validity(agent_obs, agent_mask, action, stars[idx])
-                    and timestep > 21
-                    and not throw
-                ):
-                    self.save_sample(agent_obs, agent_mask, values[idx], action)
+                if self.check_validity(agent_obs, agent_mask, action, stars[idx]) and timestep > 21 and not throw:
+                    self.save_sample(agent_obs, agent_mask, values[idx], action, timestep, length)
 
             obs, _, terminated, _, _ = self.env.step(actions)
 
@@ -160,9 +158,7 @@ class ReplayDataset(torch.utils.data.IterableDataset):
         ]
 
         # convert to 2D array
-        map = [
-            map[i : i + game["mapWidth"]] for i in range(0, len(map), game["mapWidth"])
-        ]
+        map = [map[i : i + game["mapWidth"]] for i in range(0, len(map), game["mapWidth"])]
 
         # Pad the game with '#' to make it 24x24
         pad_width = 24 - width
