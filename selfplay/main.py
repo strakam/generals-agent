@@ -123,19 +123,19 @@ class NeptuneLogger:
             self.run.stop()
 
 
-def create_environment(agent_names: List[str], config: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    dims = (config.grid_size, config.grid_size)
+def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
+    dims = (cfg.grid_size, cfg.grid_size)
     grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(0, 0), (3, 3)])
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
                 agents=agent_names,
                 grid_factory=grid_factory,
-                truncation=config.truncation,
+                truncation=cfg.truncation,
                 pad_observations_to=24,
                 reward_fn=WinLoseRewardFn(),
             )
-            for _ in range(config.n_envs)
+            for _ in range(cfg.n_envs)
         ],
         shared_memory=True
     )

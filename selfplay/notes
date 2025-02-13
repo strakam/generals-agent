@@ -1,21 +1,22 @@
 Variance Reduction:
 - (return/advantage) normalization ?
-- one value function that sees everything?
-- moving average instead of value function? Or average over minibatch?
+- one oracle value function that sees everything?
 - Add KL divergence to loss? -> need to calculate it correctly because of more complex action space
-
 - Reward shaping - is it dangerous or lez go?
-- what should i optimize first? hyper-params? scaling on maybe 2 gpus? should i try smaller network?
 
-- clip timesteps on 700
-- make actions end-to-end without conditioning -> + increased confidence that PPO is correct, - much larger action space (is it?)
-- selfplay simultaneously or interleave
 
+For selfplay
+- set good n_steps value (700 sounds nice)
+- make actions end-to-end without conditioning -> + increased confidence that PPO is correct, - much larger action space (is it?) - probably not a good idea
+- selfplay simultaneously or interleave ?
+
+
+- argmax significantly worse than sampling?? (ppo) 
 
 
 TODOs:
 - checkpointing
 - eval vs OG
-- add shared memory for async env? 
+- add shared memory for async env? -- tried, looks like yes
 - try moving env.reset() outside
 - revert normalization as now i use experimental one
