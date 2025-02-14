@@ -9,6 +9,8 @@ For selfplay
 - set good n_steps value (700 sounds nice)
 - make actions end-to-end without conditioning -> + increased confidence that PPO is correct, - much larger action space (is it?) - probably not a good idea
 - selfplay simultaneously or interleave ?
+- probably need for big compute -> focus a bit on smaller network? (reduction by 10M params seems to work)
+- it took a lot of time (?) to train against random policy
 
 
 - argmax significantly worse than sampling?? (ppo) 

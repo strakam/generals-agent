@@ -489,5 +489,5 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     if eval_mode:
         model.eval()
 
-    model = torch.compile(model, fullgraph=True, dynamic=False)
+    # model = torch.compile(model, fullgraph=True, dynamic=False)
     return model

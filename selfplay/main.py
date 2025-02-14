@@ -16,6 +16,7 @@ from network import load_network, Network
 
 torch.set_float32_matmul_precision("medium")
 
+
 class WinLoseRewardFn(RewardFn):
     """A simple reward function. +1 if the agent wins. -1 if they lose."""
 
@@ -40,20 +41,16 @@ def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 768
-    n_steps: int = 200
-    batch_size: int = 768
+    n_envs: int = 512
+    n_steps: int = 400
+    batch_size: int = 512
     n_epochs: int = 4
-    truncation: int = 199  # Reduced from 1500 since 4x4 games should be shorter
-    grid_size: int = 5  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [32, 64, 64, 96])
-    repeats: List[int] = field(default_factory=lambda: [2, 1, 1, 1])
-    checkpoint_path: str = ""
-    
-    # Evaluation parameters
-    eval_interval: int = 5  # Run evaluation every N iterations
-    eval_steps: int = 200  # Number of steps to run during evaluation
-    
+    truncation: int = 400  # Reduced from 1500 since 4x4 games should be shorter
+    grid_size: int = 23  # Already set to 4
+    channel_sequence: List[int] = field(default_factory=lambda: [256, 320, 384, 384])
+    repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
+    checkpoint_path: str = "step=52000.ckpt"
+
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     learning_rate: float = 1.5e-4  # Standard PPO learning rate
@@ -124,8 +121,7 @@ class NeptuneLogger:
 
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    dims = (cfg.grid_size, cfg.grid_size)
-    grid_factory = GridFactory(min_grid_dims=dims, max_grid_dims=dims, general_positions=[(0, 0), (3, 3)])
+    grid_factory = GridFactory(mode="generalsio")
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -137,7 +133,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
             )
             for _ in range(cfg.n_envs)
         ],
-        shared_memory=True
+        shared_memory=True,
     )
 
 
@@ -160,17 +156,26 @@ class SelfPlayTrainer:
         # Set up logger.
         self.logger = NeptuneLogger(cfg, self.fabric)
 
-        # Load network or initialize new one, set up optimizer, and configure the agent.
+        # Load or initialize the learning network
         if cfg.checkpoint_path != "":
             self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
+            # Load the fixed network from the same checkpoint
+            self.fixed_network = load_network(cfg.checkpoint_path, cfg.n_envs)
+            self.fixed_network.eval()  # Set fixed network to evaluation mode
         else:
-            self.network = Network(batch_size=cfg.n_envs, channel_sequence=cfg.channel_sequence, repeats=cfg.repeats)
+            seq = cfg.channel_sequence
+            self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
+            self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
+            self.fixed_network.eval()
             n_params = sum(p.numel() for p in self.network.parameters())
             print(f"Number of parameters: {n_params:,}")
+
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
+        self.fixed_network = self.fabric.setup(self.fixed_network)
 
         self.network.reset()
+        self.fixed_network.reset()
 
         # Create environment.
         self.agent_names = ["1", "2"]
@@ -179,11 +184,11 @@ class SelfPlayTrainer:
         # Setup expected tensor shapes for rollouts.
         self.n_agents = 2
         self.n_channels = self.network.n_channels
-        self.obs_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, self.n_channels, 24, 24)
-        self.masks_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 24, 24, 4)
-        self.actions_shape = (cfg.n_steps, cfg.n_envs, self.n_agents, 5)
-        self.logprobs_shape = (cfg.n_steps, cfg.n_envs, self.n_agents)
-        self.rewards_shape = (cfg.n_steps, cfg.n_envs, self.n_agents)
+        self.obs_shape = (cfg.n_steps, cfg.n_envs, self.n_channels, 24, 24)
+        self.masks_shape = (cfg.n_steps, cfg.n_envs, 24, 24, 4)
+        self.actions_shape = (cfg.n_steps, cfg.n_envs, 5)
+        self.logprobs_shape = (cfg.n_steps, cfg.n_envs)
+        self.rewards_shape = (cfg.n_steps, cfg.n_envs)
         self.dones_shape = (cfg.n_steps, cfg.n_envs)
 
         with self.fabric.device:
@@ -300,7 +305,7 @@ class SelfPlayTrainer:
             rewards: (n_envs, n_agents)
         """
         with self.fabric.device:
-            # Process observations. 
+            # Process observations.
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
             augmented_obs = torch.stack(augmented_obs, dim=1)
@@ -332,78 +337,6 @@ class SelfPlayTrainer:
 
         return augmented_obs, mask, rewards
 
-    def evaluate(self):
-        """Run evaluation using the predict method."""
-        self.network.eval()  # Set network to evaluation mode
-        wins, draws, losses = 0, 0, 0
-        total_steps = 0
-        
-        next_obs, infos = self.envs.reset()
-        next_obs, mask, _ = self.process_observations(next_obs, infos)
-        
-        with torch.no_grad():
-            for _ in range(self.cfg.eval_steps):
-                total_steps += self.cfg.n_envs
-                
-                # Get actions using predict method for player 1
-                player1_obs = next_obs[:, 0]
-                player1_mask = mask[:, 0]
-                player1_actions = self.network.predict(player1_obs, player1_mask)
-                
-                # Generate random actions for player 2
-                player2_actions, _ = generate_random_action(self.cfg.n_envs, self.fabric.device)
-                
-                # Combine actions
-                actions = torch.stack([player1_actions, player2_actions], dim=1)
-                
-                # Step the environment
-                _actions = actions.cpu().numpy().astype(int)
-                next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
-                next_obs, mask, _ = self.process_observations(next_obs, infos)
-                
-                # Track outcomes
-                dones = np.logical_or(terminations, truncations)
-                if any(dones):
-                    for env_idx in range(self.cfg.n_envs):
-                        if dones[env_idx]:
-                            p1_won = infos[self.agent_names[0]][env_idx][3]
-                            p2_won = infos[self.agent_names[1]][env_idx][3]
-                            if p1_won:
-                                wins += 1
-                            elif p2_won:
-                                losses += 1
-                            else:
-                                draws += 1
-        
-        self.network.train()  # Set network back to training mode
-        
-        # Calculate rates
-        total_games = wins + draws + losses
-        if total_games > 0:
-            win_rate = wins / total_games
-            draw_rate = draws / total_games
-            loss_rate = losses / total_games
-        else:
-            win_rate = draw_rate = loss_rate = 0.0
-            
-        self.fabric.print(
-            f"Evaluation stats - "
-            f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
-            f"Total games: {total_games}"
-        )
-        
-        # Log evaluation metrics
-        self.logger.log_metrics(
-            {
-                "eval/win_rate": win_rate,
-                "eval/draw_rate": draw_rate,
-                "eval/loss_rate": loss_rate,
-                "eval/total_games": total_games,
-            }
-        )
-        
-        return win_rate, draw_rate, loss_rate
-
     def run(self):
         """Runs the main training loop."""
 
@@ -414,52 +347,47 @@ class SelfPlayTrainer:
             next_obs, mask, _ = self.process_observations(next_obs, infos)
             next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
             wins, draws, losses = 0, 0, 0
-            
-            # Run evaluation if it's time
-            if iteration % self.cfg.eval_interval == 0:
-                self.evaluate()
-            
+
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
-                self.obs[step] = next_obs
+                self.obs[step] = next_obs[:, 0]  # Only store player 1's observation
                 self.dones[step] = next_done
-                self.masks[step] = mask
+                self.masks[step] = mask[:, 0]  # Only store player 1's mask
 
                 with torch.no_grad():
-                    # Compute actions for the active player.
+                    # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
                     player1_actions, player1_logprobs, _ = self.network(player1_obs, player1_mask)
 
-                    # Generate random actions for the second agent
-                    player2_actions, player2_logprobs = generate_random_action(self.cfg.n_envs, self.fabric.device)
+                    # Store player 1's actions and logprobs
+                    self.actions[step] = player1_actions
+                    self.logprobs[step] = player1_logprobs
 
-                    self.actions[step, :, 0] = player1_actions
-                    self.actions[step, :, 1] = player2_actions
-                    self.logprobs[step, :, 0] = player1_logprobs
-                    self.logprobs[step, :, 1] = player2_logprobs
+                    # Get actions for player 2 (fixed player) without storing
+                    player2_obs = next_obs[:, 1]
+                    player2_mask = mask[:, 1]
+                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
 
-                    # Log mean probability and stddev per step for player 1
+                    # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
                     mean_prob = probs.mean().item()
                     std_prob = probs.std().item()
-                    self.logger.log_metrics({
-                        "step_mean_prob": mean_prob,
-                        "step_std_prob": std_prob,
-                    })
+                    self.logger.log_metrics(
+                        {
+                            "step_mean_prob": mean_prob,
+                            "step_std_prob": std_prob,
+                        }
+                    )
 
-                # Step the environment.
-                _actions = self.actions[step].cpu().numpy().astype(int)
+                # Combine actions for environment step
+                _actions = torch.stack([player1_actions, player2_actions], dim=1).cpu().numpy().astype(int)
                 next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
 
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
-                
-                # If game is truncated, player 1 gets -1 reward
-                for env_idx in range(self.cfg.n_envs):
-                    if truncations[env_idx]:
-                        step_rewards[env_idx, 0] = -1.0
-                
-                self.rewards[step] = step_rewards
+
+                # Store only player 1's rewards
+                self.rewards[step] = step_rewards[:, 0]
 
                 dones = np.logical_or(terminations, truncations)
                 next_done = torch.tensor(dones, device=self.fabric.device)
@@ -479,18 +407,13 @@ class SelfPlayTrainer:
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
-                # Verify rewards are exactly ±1 or 0
-                # assert torch.all(
-                #     (torch.abs(self.rewards) == 1.0) | (self.rewards == 0.0)
-                # ), f"All rewards must be exactly +1, -1, or 0, {self.rewards}"
-
                 returns = torch.zeros_like(self.rewards)
                 next_value = torch.zeros_like(self.rewards[0])
-                next_non_terminal = 1.0 - next_done.float().unsqueeze(-1)
+                next_non_terminal = 1.0 - next_done.float()
                 for t in reversed(range(self.cfg.n_steps)):
                     returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
                     next_value = returns[t]
-                    next_non_terminal = 1.0 - self.dones[t].float().unsqueeze(-1)
+                    next_non_terminal = 1.0 - self.dones[t].float()
 
             # Calculate win/draw/loss percentages
             total_games = wins + draws + losses
@@ -517,11 +440,11 @@ class SelfPlayTrainer:
             )
 
             # Flatten and prepare dataset for training
-            b_obs = self.obs[:, :, 0].reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
-            b_actions = self.actions[:, :, 0].reshape(-1, 5)
-            b_returns = returns[:, :, 0].reshape(-1)
-            b_logprobs = self.logprobs[:, :, 0].reshape(-1)
-            b_masks = self.masks[:, :, 0].reshape(-1, 24, 24, 4)
+            b_obs = self.obs.reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
+            b_actions = self.actions.reshape(-1, 5)
+            b_returns = returns.reshape(-1)
+            b_logprobs = self.logprobs.reshape(-1)
+            b_masks = self.masks.reshape(-1, 24, 24, 4)
 
             dataset = {
                 "observations": b_obs,
