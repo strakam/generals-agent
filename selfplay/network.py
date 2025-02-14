@@ -234,6 +234,7 @@ class Network(L.LightningModule):
         square_logprob = square_dist.log_prob(square)
         direction_logprob = direction_dist.log_prob(direction)
         logprob = square_logprob + direction_logprob
+        
         entropy = square_dist.entropy() + direction_dist.entropy()
 
         # Create action tensor with shape [batch_size, 5]
@@ -279,15 +280,15 @@ class Network(L.LightningModule):
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
         
         # Use argmax instead of sampling
-        square = square_logits.argmax(dim=1)
+        square = square_logits.argmax(dim=1).long()
         i, j = square // 24, square % 24
 
         # Get direction logits based on selected square
-        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
+        square_reshaped = F.one_hot(square, num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
         representation_with_square = torch.cat((representation, square_reshaped), dim=1)
         direction = self.direction_head(representation_with_square)
         direction += direction_mask
-        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
+        direction = direction[torch.arange(direction.shape[0]), :, i, j]
 
         # Use argmax for direction
         direction = direction.argmax(dim=1)
