@@ -16,8 +16,8 @@ class Network(L.LightningModule):
         self,
         lr: float = 1e-4,
         n_steps: int = 100000,
-        repeats: list[int] = [2, 2, 2, 1],
-        channel_sequence: list[int] = [256, 320, 384, 384],
+        repeats: list[int] = [2, 2, 1, 1],
+        channel_sequence: list[int] = [192, 224, 256, 256],
         compile: bool = False,
         history_size: int = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
@@ -234,7 +234,7 @@ class Network(L.LightningModule):
         square_logprob = square_dist.log_prob(square)
         direction_logprob = direction_dist.log_prob(direction)
         logprob = square_logprob + direction_logprob
-        
+
         entropy = square_dist.entropy() + direction_dist.entropy()
 
         # Create action tensor with shape [batch_size, 5]
@@ -267,7 +267,6 @@ class Network(L.LightningModule):
 
         return loss, pg_loss, entropy_loss, ratio
 
-
     @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
         obs = self.normalize_observations(obs.float())
@@ -278,7 +277,7 @@ class Network(L.LightningModule):
         # Get square logits and apply mask
         square_logits_unmasked = self.square_head(representation)
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
-        
+
         # Use argmax instead of sampling
         square = square_logits.argmax(dim=1).long()
         i, j = square // 24, square % 24
@@ -480,7 +479,7 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     checkpoint = torch.load(path, map_location=device)
     state_dict = checkpoint["state_dict"]
 
-    model = Network(batch_size=batch_size, compile=True)  # Initially create without compilation
+    model = Network(batch_size=batch_size, compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)

@@ -33,18 +33,18 @@ class SelfPlayConfig:
     n_steps: int = 600
     batch_size: int = 512
     n_epochs: int = 4
-    truncation: int = 400  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 600  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [256, 320, 384, 384])
-    repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "step=52000.ckpt"
+    channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
+    repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
+    checkpoint_path: str = "step=50000.ckpt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.5e-4  # Standard PPO learning rate
+    learning_rate: float = 1.0e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.02  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     target_kl: float = 0.02  # Target KL divergence
 
     # Lightning fabric parameters
