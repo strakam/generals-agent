@@ -22,19 +22,7 @@ class WinLoseRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        return float(1 * change_in_num_generals_owned) - 0.002
-
-
-def generate_random_action(batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Generate random actions in format [0, i, j, d, 0] where i,j,d are in range(4)"""
-    actions = torch.zeros((batch_size, 5), device=device)
-    # Generate random i, j coordinates in range(4)
-    actions[:, 1] = torch.randint(0, 4, (batch_size,), device=device)  # i coordinate
-    actions[:, 2] = torch.randint(0, 4, (batch_size,), device=device)  # j coordinate
-    actions[:, 3] = torch.randint(0, 4, (batch_size,), device=device)  # direction
-    # Generate random logprobs (since these are random actions)
-    logprobs = torch.ones(batch_size, device=device) * float("-inf")  # -inf logprob for random actions
-    return actions, logprobs
+        return float(1 * change_in_num_generals_owned)
 
 
 @dataclass
@@ -42,7 +30,7 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 512
-    n_steps: int = 400
+    n_steps: int = 600
     batch_size: int = 512
     n_epochs: int = 4
     truncation: int = 400  # Reduced from 1500 since 4x4 games should be shorter
@@ -241,16 +229,11 @@ class SelfPlayTrainer:
 
                 loss, pg_loss, entropy_loss, ratio = self.network.training_step(batch, self.cfg)
 
-                # Compute fraction of training samples that were clipped.
-                clip_low = 1.0 - self.cfg.clip_coef
-                clip_high = 1.0 + self.cfg.clip_coef
-                clipped_mask = (ratio < clip_low) | (ratio > clip_high)
-                clipfrac = clipped_mask.float().mean()  # fraction in [0,1]
-
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
                     logratio = torch.log(ratio)
                     approx_kl = ((ratio - 1) - logratio).mean()
+                    clipfrac = ((ratio - 1.0).abs() > self.cfg.clip_coef).float().mean()  # fraction in [0,1]
 
                 self.optimizer.zero_grad(set_to_none=True)
                 fabric.backward(loss)
