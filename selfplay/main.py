@@ -15,7 +15,7 @@ from generals.core.observation import Observation
 from generals.core.action import Action
 from network import load_network, Network, load_fabric_checkpoint
 
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")
 
 
 class WinLoseRewardFn(RewardFn):
@@ -30,9 +30,9 @@ class WinLoseRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 544
+    n_envs: int = 512
     n_steps: int = 700
-    batch_size: int = 544
+    batch_size: int = 512
     n_epochs: int = 4
     truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
@@ -272,7 +272,7 @@ class SelfPlayTrainer:
 
 
                 loss, pg_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
-                old_logprobs = batch["logprobs"]
+                oldlogprobs = batch["logprobs"]
 
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
@@ -309,13 +309,13 @@ class SelfPlayTrainer:
                         "train/clipfrac": clipfrac.item(),
                         "train/approx_kl": approx_kl.item(),
                         "train/newlogprobs": newlogprobs.mean().item(),
-                        "train/oldlogprobs": old_logprobs.mean().item(),
+                        "train/oldlogprobs": oldlogprobs.mean().item(),
                         "train/logratio_min": logratio.min().item(),
                         "train/logratio_max": logratio.max().item(), 
                         "train/newlogprobs_min": newlogprobs.min().item(),
                         "train/newlogprobs_max": newlogprobs.max().item(),
-                        "train/oldlogprobs_min": old_logprobs.min().item(),
-                        "train/oldlogprobs_max": old_logprobs.max().item(),
+                        "train/oldlogprobs_min": oldlogprobs.min().item(),
+                        "train/oldlogprobs_max": oldlogprobs.max().item(),
                     }
                 )
 
@@ -333,9 +333,9 @@ class SelfPlayTrainer:
                         "newlogprobs": f"{newlogprobs.mean().item():.3f}",
                         "min_newlogprobs": f"{newlogprobs.min().item():.3f}",
                         "max_newlogprobs": f"{newlogprobs.max().item():.3f}",
-                        "oldlogprobs": f"{old_logprobs.mean().item():.3f}",
-                        "min_oldlogprobs": f"{old_logprobs.min().item():.3f}",
-                        "max_oldlogprobs": f"{old_logprobs.max().item():.3f}",
+                        "oldlogprobs": f"{oldlogprobs.mean().item():.3f}",
+                        "min_oldlogprobs": f"{oldlogprobs.min().item():.3f}",
+                        "max_oldlogprobs": f"{oldlogprobs.max().item():.3f}",
                     }
                 )
 
@@ -413,7 +413,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
+                    player2_actions, _, _ = self.fixed_network.predict(player2_obs, player2_mask)
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)

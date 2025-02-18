@@ -245,8 +245,8 @@ class Network(L.LightningModule):
         return action, logprob, entropy
 
     @torch.compile(dynamic=False, fullgraph=True)
-    def calculate_loss(self, newlogprobs, entropy, returns, logprobs, args):
-        ratio = torch.exp(newlogprobs - logprobs)#  + 1e-9
+    def calculate_loss(self, newlogprobs, oldlogprobs, entropy, returns, args):
+        ratio = torch.exp(newlogprobs - oldlogprobs)#  + 1e-9
         pg_loss1 = -returns * ratio
         pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
@@ -259,11 +259,11 @@ class Network(L.LightningModule):
         masks = batch["masks"]
         actions = batch["actions"]
         returns = batch["returns"]
-        logprobs = batch["logprobs"]
+        oldlogprobs = batch["logprobs"]
 
         _, newlogprobs, entropy = self(obs, masks, actions)
 
-        loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, entropy, returns, logprobs, args)
+        loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, oldlogprobs, entropy, returns, args)
 
         return loss, pg_loss, entropy_loss, ratio, newlogprobs
 
