@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 import torch
 import numpy as np
 from generals.core.action import Action, compute_valid_move_mask
@@ -7,7 +7,7 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from network import Network
+from supervised.network import Network
 
 GRID_SIZE = 24
 DEFAULT_HISTORY_SIZE = 5
@@ -22,9 +22,7 @@ def conditional_compile(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if isinstance(
-            self, (NeuroAgent, OnlineAgent, SelfPlayAgent)
-        ) and not isinstance(self, SupervisedAgent):
+        if isinstance(self, (NeuroAgent, OnlineAgent, SelfPlayAgent)) and not isinstance(self, SupervisedAgent):
             return torch.compile(func)(self, *args, **kwargs)
         return func(self, *args, **kwargs)
 
@@ -49,9 +47,7 @@ class NeuroAgent(Agent):
         id: str = "Neuro",
         history_size: Optional[int] = DEFAULT_HISTORY_SIZE,
         batch_size: Optional[int] = DEFAULT_BATCH_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         """
         Initializes the NeuroAgent with the specified parameters.
@@ -94,9 +90,7 @@ class NeuroAgent(Agent):
         self.mountains = torch.zeros(shape, device=device).bool()
         self.seen = torch.zeros(shape, device=device).bool()
         self.enemy_seen = torch.zeros(shape, device=device).bool()
-        self.last_observation = torch.zeros(
-            (self.batch_size, self.n_channels, 24, 24), device=device
-        )
+        self.last_observation = torch.zeros((self.batch_size, self.n_channels, 24, 24), device=device)
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -203,7 +197,7 @@ class NeuroAgent(Agent):
         return augmented_obs
 
     @conditional_compile
-    def act(self, obs: np.ndarray, mask: np.ndarray) -> Action:
+    def act(self, obs: np.ndarray, mask: np.ndarray) -> Tuple[Action, float]:
         """
         Based on a new observation, augment the internal state and return an action.
         """
@@ -235,9 +229,7 @@ class SelfPlayAgent(NeuroAgent):
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         super().__init__(network, id, history_size, batch_size, device)
 
@@ -255,12 +247,8 @@ class SelfPlayAgent(NeuroAgent):
         actions[actions[:, 3] == 4, 0] = 1
 
         # Get log probabilities of selected actions
-        square_logprob = torch.log_softmax(square_logits, dim=1)[
-            torch.arange(square.shape[0]), square
-        ]
-        direction_logprob = torch.log_softmax(direction_logits, dim=1)[
-            torch.arange(direction.shape[0]), direction
-        ]
+        square_logprob = torch.log_softmax(square_logits, dim=1)[torch.arange(square.shape[0]), square]
+        direction_logprob = torch.log_softmax(direction_logits, dim=1)[torch.arange(direction.shape[0]), direction]
         logprob = square_logprob + direction_logprob
 
         return actions, logprob
@@ -288,9 +276,7 @@ class OnlineAgent(NeuroAgent):
         network: L.LightningModule | None = None,
         id: str = "Neuro",
         history_size: int | None = DEFAULT_HISTORY_SIZE,
-        device: torch.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        ),
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         super().__init__(network, id, history_size, 1, device)
 
@@ -301,7 +287,7 @@ class OnlineAgent(NeuroAgent):
         obs.pad_observation(24)
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
-        action = super().act(obs, mask)[0]  # Take the only action
+        action = super().act(obs, mask)[0]
         return action
 
     def precompile(self):
@@ -346,7 +332,6 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
     Returns:
         NeuroAgent: Loaded agent ready for inference
     """
-    # Map location based on availability
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     network = torch.load(path, map_location=device)
     state_dict = network["state_dict"]
@@ -358,15 +343,12 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
 
     if eval_mode:
         model.eval()
-
     agent_id = path.split("/")[-1].split(".")[0]
 
     if mode == "online":
         agent = OnlineAgent(model, id=agent_id, device=device)
     elif mode == "supervised":
-        agent = SupervisedAgent(
-            model, id=agent_id, batch_size=batch_size, device=device
-        )
+        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
     else:  # "base" or default case
         agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
 

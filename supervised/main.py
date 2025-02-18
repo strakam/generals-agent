@@ -17,9 +17,9 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
-    buffer_size: int = 18000
-    batch_size: int = 1792
-    n_workers: int = 32
+    buffer_size: int = 18
+    batch_size: int = 92
+    n_workers: int = 4
     # Training parameters
     learning_rate: float = 2e-4
     n_epochs: int = 16
@@ -135,6 +135,7 @@ def main():
             lr=config.learning_rate, channel_sequence=config.channel_sequence, repeats=config.repeats, compile=True
         )
         print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
+        trainer.logger.experiment["total_parameters"] = sum(p.numel() for p in model.parameters())
         trainer.fit(model, train_dataloaders=dataloader)
 
 
