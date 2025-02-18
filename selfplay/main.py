@@ -7,12 +7,13 @@ import argparse
 import neptune
 from lightning.fabric import Fabric
 from tqdm import tqdm
+import os
 
 from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
-from network import load_network, Network
+from network import load_network, Network, load_fabric_checkpoint
 
 torch.set_float32_matmul_precision("medium")
 
@@ -29,15 +30,20 @@ class WinLoseRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 512
-    n_steps: int = 600
-    batch_size: int = 512
+    n_envs: int = 544
+    n_steps: int = 700
+    batch_size: int = 544
     n_epochs: int = 4
-    truncation: int = 600  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "step=50000.ckpt"
+    # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+
+    # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
+    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.0, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -130,6 +136,8 @@ class SelfPlayTrainer:
 
     def __init__(self, cfg: SelfPlayConfig):
         self.cfg = cfg
+        # Track which win rate thresholds we've already saved checkpoints for
+        self.saved_thresholds = set()
 
         # Initialize Fabric and seed the experiment.
         self.fabric = Fabric(
@@ -187,6 +195,41 @@ class SelfPlayTrainer:
             self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32, device=device)
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
+
+    def save_checkpoint(self, win_rate: float, threshold: float):
+        """Save a checkpoint in Fabric format when crossing a win rate threshold."""
+        if self.fabric.is_global_zero:  # Only save on main process
+            checkpoint_name = f"winrate_{threshold:.2f}.ckpt"
+            checkpoint_path = f"{self.cfg.checkpoint_dir}/{checkpoint_name}"
+            
+            # Create checkpoint directory if it doesn't exist
+            os.makedirs(self.cfg.checkpoint_dir, exist_ok=True)
+            
+            # Create state dictionary with everything needed to resume training
+            state = {
+                "model": self.network,
+                "fixed_model": self.fixed_network,
+                "optimizer": self.optimizer,
+                "win_rate": win_rate,
+                "threshold": threshold,
+                "saved_thresholds": self.saved_thresholds,
+                "config": self.cfg
+            }
+            
+            # Let Fabric handle the saving
+            self.fabric.save(checkpoint_path, state)
+            print(f"Saved Fabric checkpoint at win rate {win_rate:.2%} to {checkpoint_path}")
+            
+            # Log to Neptune
+            self.logger.log_metrics({"checkpoint/fabric_win_rate": win_rate})
+
+    def check_and_save_checkpoints(self, win_rate: float):
+        """Check if we've crossed any win rate thresholds and save checkpoints if needed."""
+        for threshold in self.cfg.win_rate_thresholds:
+            if win_rate >= threshold and threshold not in self.saved_thresholds:
+                # Save both types of checkpoints
+                self.save_checkpoint(win_rate, threshold)
+                self.saved_thresholds.add(threshold)
 
     def train(self, fabric: Fabric, data: dict):
         """Train the network using PPO on collected rollout data."""
@@ -404,6 +447,9 @@ class SelfPlayTrainer:
                 win_rate = wins / total_games
                 draw_rate = draws / total_games
                 loss_rate = losses / total_games
+
+                # Check if we should save a checkpoint
+                self.check_and_save_checkpoints(win_rate)
             else:
                 win_rate = draw_rate = loss_rate = 0.0
 

@@ -490,3 +490,35 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
 
     # model = torch.compile(model, fullgraph=True, dynamic=False)
     return model
+
+
+def load_fabric_checkpoint(path: str, batch_size: int, eval_mode: bool = True) -> Network:
+    """Load a network from a Fabric-style checkpoint file.
+    
+    Args:
+        path: Path to the Fabric checkpoint file
+        batch_size: Batch size for the network
+        eval_mode: Whether to put the model in evaluation mode
+        
+    Returns:
+        Network: Loaded network
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = torch.load(path, map_location=device)
+    
+    # Handle both direct state dict and Fabric-style nested state dict
+    if "model" in checkpoint and isinstance(checkpoint["model"], dict):
+        state_dict = checkpoint["model"]
+    else:
+        state_dict = checkpoint
+        
+    model = Network(batch_size=batch_size, compile=True)
+    model_keys = model.state_dict().keys()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
+    model.load_state_dict(filtered_state_dict)
+    
+    model = model.to(device)
+    if eval_mode:
+        model.eval()
+        
+    return model
