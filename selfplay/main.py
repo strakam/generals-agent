@@ -13,9 +13,9 @@ from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
-from network import load_network, Network, load_fabric_checkpoint
+from network import load_network, Network
 
-torch.set_float32_matmul_precision("high")
+torch.set_float32_matmul_precision("medium")
 
 
 class WinLoseRewardFn(RewardFn):
@@ -30,11 +30,11 @@ class WinLoseRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 512
+    n_envs: int = 544
     n_steps: int = 700
-    batch_size: int = 512
+    batch_size: int = 544
     n_epochs: int = 4
-    truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 7  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
@@ -43,7 +43,7 @@ class SelfPlayConfig:
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
+    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.00, 0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -208,12 +208,7 @@ class SelfPlayTrainer:
             # Create state dictionary with everything needed to resume training
             state = {
                 "model": self.network,
-                "fixed_model": self.fixed_network,
                 "optimizer": self.optimizer,
-                "win_rate": win_rate,
-                "threshold": threshold,
-                "saved_thresholds": self.saved_thresholds,
-                "config": self.cfg
             }
             
             # Let Fabric handle the saving
@@ -413,7 +408,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _ = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
@@ -513,6 +508,34 @@ def main(args):
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
 
+def clean_checkpoint(checkpoint_path, output_path=None):
+    """
+    Loads a checkpoint, removes the config object and threshold-related fields, and re-saves it.
+    
+    Args:
+        checkpoint_path (str): Path to the original checkpoint file.
+        output_path (str, optional): Path to save the cleaned checkpoint.
+                                     If not provided, will overwrite the original.
+    """
+    # Load the checkpoint from the specified file.
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    
+    # Remove the problematic fields if they exist
+    fields_to_remove = ["config", "threshold", "saved_thresholds"]
+    for field in fields_to_remove:
+        if field in checkpoint:
+            print(f"Removing '{field}' from checkpoint.")
+            del checkpoint[field]
+        else:
+            print(f"No '{field}' key found in checkpoint.")
+    
+    # Determine the output path: either overwrite or save to a new file.
+    if output_path is None:
+        output_path = checkpoint_path
+    
+    # Save the cleaned checkpoint.
+    torch.save(checkpoint, output_path)
+    print(f"Checkpoint successfully saved to '{output_path}' without the removed fields.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Self-Play Configuration")

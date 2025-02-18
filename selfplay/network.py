@@ -42,13 +42,24 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
+        self.value_head = nn.Sequential(
+            Pyramid(final_channels, [], []),
+            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(24 * 24, 1),
+            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
+        )
+
         self.square_loss = nn.CrossEntropyLoss()
-        self.direction_loss = nn.CrossEntropyLoss()
+        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0])
+        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
 
         if compile:
             self.backbone = torch.compile(self.backbone, fullgraph=True, dynamic=False)
             self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
+            self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
     @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):
@@ -246,7 +257,8 @@ class Network(L.LightningModule):
 
     @torch.compile(dynamic=False, fullgraph=True)
     def calculate_loss(self, newlogprobs, oldlogprobs, entropy, returns, args):
-        ratio = torch.exp(newlogprobs - oldlogprobs)#  + 1e-9
+        delta = torch.clamp(newlogprobs - oldlogprobs, -20, 20) # Try clamping this
+        ratio = torch.exp(delta)
         pg_loss1 = -returns * ratio
         pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
@@ -337,7 +349,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 256 if stage_channels == [] else stage_channels[0]
+        first_channels = 192 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -475,20 +487,15 @@ def load_network(path: str, batch_size: int, eval_mode: bool = True) -> Network:
     Returns:
         Network: Loaded network
     """
+    # model = torch.compile(model, fullgraph=True, dynamic=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load(path, map_location=device)
-    state_dict = checkpoint["state_dict"]
+    network = torch.load(path, map_location=device)
+    state_dict = network["state_dict"]
 
-    model = Network(batch_size=batch_size, compile=True)
+    model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True, batch_size=batch_size)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
-
-    model = model.to(device)
-    if eval_mode:
-        model.eval()
-
-    # model = torch.compile(model, fullgraph=True, dynamic=False)
     return model
 
 
