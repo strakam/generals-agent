@@ -310,6 +310,12 @@ class SelfPlayTrainer:
                         "train/approx_kl": approx_kl.item(),
                         "train/newlogprobs": newlogprobs.mean().item(),
                         "train/oldlogprobs": old_logprobs.mean().item(),
+                        "train/logratio_min": logratio.min().item(),
+                        "train/logratio_max": logratio.max().item(), 
+                        "train/newlogprobs_min": newlogprobs.min().item(),
+                        "train/newlogprobs_max": newlogprobs.max().item(),
+                        "train/oldlogprobs_min": old_logprobs.min().item(),
+                        "train/oldlogprobs_max": old_logprobs.max().item(),
                     }
                 )
 
@@ -323,8 +329,13 @@ class SelfPlayTrainer:
                         "approx_kl": f"{approx_kl.item():.3f}",
                         "logratio": f"{logratio.mean().item():.3f}",
                         "ratio": f"{ratio.mean().item():.3f}",
+                        "min_ratio": f"{ratio.min().item():.3f}",
                         "newlogprobs": f"{newlogprobs.mean().item():.3f}",
+                        "min_newlogprobs": f"{newlogprobs.min().item():.3f}",
+                        "max_newlogprobs": f"{newlogprobs.max().item():.3f}",
                         "oldlogprobs": f"{old_logprobs.mean().item():.3f}",
+                        "min_oldlogprobs": f"{old_logprobs.min().item():.3f}",
+                        "max_oldlogprobs": f"{old_logprobs.max().item():.3f}",
                     }
                 )
 
