@@ -336,7 +336,7 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
     network = torch.load(path, map_location=device)
     state_dict = network["state_dict"]
 
-    model = Network(channel_sequence=[256, 320, 384, 384], compile=True)
+    model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)

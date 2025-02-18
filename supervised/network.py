@@ -83,7 +83,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        # value = self.value_head(x)
+        value = self.value_head(x)
 
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
@@ -166,7 +166,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 256 if stage_channels == [] else stage_channels[0]
+        first_channels = 192 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
