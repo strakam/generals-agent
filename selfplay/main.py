@@ -43,7 +43,7 @@ class SelfPlayConfig:
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.0, 0.30, 0.45, 0.60, 0.75, 0.90])
+    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -270,7 +270,9 @@ class SelfPlayTrainer:
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
 
-                loss, pg_loss, entropy_loss, ratio = self.network.training_step(batch, self.cfg)
+
+                loss, pg_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
+                old_logprobs = batch["logprobs"]
 
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
@@ -301,10 +303,13 @@ class SelfPlayTrainer:
                         "train/learning_rate": current_lr,
                         "train/loss": loss.item(),
                         "train/ratio": ratio.mean().item(),
+                        "train/logratio": logratio.mean().item(),
                         "train/policy_loss": pg_loss.mean().item(),
                         "train/entropy": entropy_loss.mean().item(),
                         "train/clipfrac": clipfrac.item(),
                         "train/approx_kl": approx_kl.item(),
+                        "train/newlogprobs": newlogprobs.mean().item(),
+                        "train/oldlogprobs": old_logprobs.mean().item(),
                     }
                 )
 
@@ -316,6 +321,10 @@ class SelfPlayTrainer:
                         "entropy": f"{entropy_loss.mean().item():.3f}",
                         "clipfrac": f"{clipfrac.item():.3f}",
                         "approx_kl": f"{approx_kl.item():.3f}",
+                        "logratio": f"{logratio.mean().item():.3f}",
+                        "ratio": f"{ratio.mean().item():.3f}",
+                        "newlogprobs": f"{newlogprobs.mean().item():.3f}",
+                        "oldlogprobs": f"{old_logprobs.mean().item():.3f}",
                     }
                 )
 

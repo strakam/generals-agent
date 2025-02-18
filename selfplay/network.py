@@ -265,7 +265,7 @@ class Network(L.LightningModule):
 
         loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, entropy, returns, logprobs, args)
 
-        return loss, pg_loss, entropy_loss, ratio
+        return loss, pg_loss, entropy_loss, ratio, newlogprobs
 
     @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
