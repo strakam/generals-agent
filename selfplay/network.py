@@ -42,24 +42,23 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.value_head = nn.Sequential(
-            Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(24 * 24, 1),
-            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
-        )
+        # self.value_head = nn.Sequential(
+        #     Pyramid(final_channels, [], []),
+        #     nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.Flatten(),
+        #     nn.Linear(24 * 24, 1),
+        #     Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
+        # )
 
         self.square_loss = nn.CrossEntropyLoss()
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0])
-        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
+        self.direction_loss = nn.CrossEntropyLoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone, fullgraph=True, dynamic=False)
             self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
-            self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
+            # self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
     @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):

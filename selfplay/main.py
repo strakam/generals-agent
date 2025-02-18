@@ -13,7 +13,7 @@ from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
-from network import load_network, Network
+from network import load_fabric_checkpoint, Network
 
 torch.set_float32_matmul_precision("medium")
 
@@ -34,16 +34,17 @@ class SelfPlayConfig:
     n_steps: int = 700
     batch_size: int = 544
     n_epochs: int = 4
-    truncation: int = 7  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "step=50000.ckpt"
+    checkpoint_path: str = "wr90.ckpt"
     # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.00, 0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
+    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -154,9 +155,9 @@ class SelfPlayTrainer:
 
         # Load or initialize the learning network
         if cfg.checkpoint_path != "":
-            self.network = load_network(cfg.checkpoint_path, cfg.n_envs)
+            self.network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
             # Load the fixed network from the same checkpoint
-            self.fixed_network = load_network(cfg.checkpoint_path, cfg.n_envs)
+            self.fixed_network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
             self.fixed_network.eval()  # Set fixed network to evaluation mode
         else:
             seq = cfg.channel_sequence
