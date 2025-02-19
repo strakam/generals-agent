@@ -331,16 +331,14 @@ class SelfPlayTrainer:
         """Processes raw observations from the environment.
            This augments memory of the agent, and obtains masks and rewards from the info dict.
         Returns:
-            augmented_obs: (n_envs, n_agents, channels, 24, 24)
+            augmented_obs: (n_envs, n_channels, 24, 24) for player 1 only
             mask: (n_envs, n_agents, 24, 24, 4)
             rewards: (n_envs, n_agents)
         """
         with self.fabric.device:
-            # Process observations.
+            # Process observations - only for player 1
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             agent1_augmented_obs = self.network.augment_observation(obs_tensor[:, 0, ...])
-            agent2_augmented_obs = self.fixed_network.augment_observation(obs_tensor[:, 1, ...])
-            augmented_obs = torch.stack([agent1_augmented_obs, agent2_augmented_obs], dim=1)
 
             # Process masks.
             mask = [
@@ -367,7 +365,7 @@ class SelfPlayTrainer:
             if self.fabric.device.type == "cuda":
                 torch.cuda.synchronize()  # Ensure all tensors are ready
 
-        return augmented_obs, mask, rewards
+        return agent1_augmented_obs, mask, rewards
 
     def run(self):
         """Runs the main training loop."""
@@ -382,13 +380,13 @@ class SelfPlayTrainer:
 
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
-                self.obs[step] = next_obs[:, 0]  # Only store player 1's observation
+                self.obs[step] = next_obs  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
 
                 with torch.no_grad():
                     # Get actions for player 1 (learning player)
-                    player1_obs = next_obs[:, 0]
+                    player1_obs = next_obs
                     player1_mask = mask[:, 0]
                     player1_actions, player1_logprobs, _ = self.network(player1_obs, player1_mask)
 
@@ -446,7 +444,7 @@ class SelfPlayTrainer:
                         next_non_terminal = 1.0 - next_done.float()
                     else:
                         next_value = returns[t + 1]
-                        next_non_terminal = 1.0 - self.dones[t+1].float()
+                        next_non_terminal = 1.0 - self.dones[t + 1].float()
                     returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
 
             # Calculate win/draw/loss percentages
