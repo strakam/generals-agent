@@ -48,7 +48,7 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 0.5e-6  # Standard PPO learning rate
+    learning_rate: float = 1.0e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.015  # Increased from 0.00 to encourage exploration
@@ -202,20 +202,20 @@ class SelfPlayTrainer:
         if self.fabric.is_global_zero:  # Only save on main process
             checkpoint_name = f"winrate_{threshold:.2f}.ckpt"
             checkpoint_path = f"{self.cfg.checkpoint_dir}/{checkpoint_name}"
-            
+
             # Create checkpoint directory if it doesn't exist
             os.makedirs(self.cfg.checkpoint_dir, exist_ok=True)
-            
+
             # Create state dictionary with everything needed to resume training
             state = {
                 "model": self.network,
                 "optimizer": self.optimizer,
             }
-            
+
             # Let Fabric handle the saving
             self.fabric.save(checkpoint_path, state)
             print(f"Saved Fabric checkpoint at win rate {win_rate:.2%} to {checkpoint_path}")
-            
+
             # Log to Neptune
             self.logger.log_metrics({"checkpoint/fabric_win_rate": win_rate})
 
@@ -266,7 +266,6 @@ class SelfPlayTrainer:
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
 
-
                 loss, pg_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
                 oldlogprobs = batch["logprobs"]
 
@@ -306,12 +305,6 @@ class SelfPlayTrainer:
                         "train/approx_kl": approx_kl.item(),
                         "train/newlogprobs": newlogprobs.mean().item(),
                         "train/oldlogprobs": oldlogprobs.mean().item(),
-                        "train/logratio_min": logratio.min().item(),
-                        "train/logratio_max": logratio.max().item(), 
-                        "train/newlogprobs_min": newlogprobs.min().item(),
-                        "train/newlogprobs_max": newlogprobs.max().item(),
-                        "train/oldlogprobs_min": oldlogprobs.min().item(),
-                        "train/oldlogprobs_max": oldlogprobs.max().item(),
                     }
                 )
 
@@ -327,11 +320,7 @@ class SelfPlayTrainer:
                         "ratio": f"{ratio.mean().item():.3f}",
                         "min_ratio": f"{ratio.min().item():.3f}",
                         "newlogprobs": f"{newlogprobs.mean().item():.3f}",
-                        "min_newlogprobs": f"{newlogprobs.min().item():.3f}",
-                        "max_newlogprobs": f"{newlogprobs.max().item():.3f}",
                         "oldlogprobs": f"{oldlogprobs.mean().item():.3f}",
-                        "min_oldlogprobs": f"{oldlogprobs.min().item():.3f}",
-                        "max_oldlogprobs": f"{oldlogprobs.max().item():.3f}",
                     }
                 )
 
@@ -349,8 +338,9 @@ class SelfPlayTrainer:
         with self.fabric.device:
             # Process observations.
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
-            augmented_obs = [self.network.augment_observation(obs_tensor[:, idx, ...]) for idx in range(self.n_agents)]
-            augmented_obs = torch.stack(augmented_obs, dim=1)
+            agent1_augmented_obs = self.network.augment_observation(obs_tensor[:, 0, ...])
+            agent2_augmented_obs = self.fixed_network.augment_observation(obs_tensor[:, 1, ...])
+            augmented_obs = torch.stack([agent1_augmented_obs, agent2_augmented_obs], dim=1)
 
             # Process masks.
             mask = [
@@ -509,10 +499,11 @@ def main(args):
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
 
+
 def clean_checkpoint(checkpoint_path, output_path=None):
     """
     Loads a checkpoint, removes the config object and threshold-related fields, and re-saves it.
-    
+
     Args:
         checkpoint_path (str): Path to the original checkpoint file.
         output_path (str, optional): Path to save the cleaned checkpoint.
@@ -520,7 +511,7 @@ def clean_checkpoint(checkpoint_path, output_path=None):
     """
     # Load the checkpoint from the specified file.
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    
+
     # Remove the problematic fields if they exist
     fields_to_remove = ["config", "threshold", "saved_thresholds"]
     for field in fields_to_remove:
@@ -529,14 +520,15 @@ def clean_checkpoint(checkpoint_path, output_path=None):
             del checkpoint[field]
         else:
             print(f"No '{field}' key found in checkpoint.")
-    
+
     # Determine the output path: either overwrite or save to a new file.
     if output_path is None:
         output_path = checkpoint_path
-    
+
     # Save the cleaned checkpoint.
     torch.save(checkpoint, output_path)
     print(f"Checkpoint successfully saved to '{output_path}' without the removed fields.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Self-Play Configuration")
