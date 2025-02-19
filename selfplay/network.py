@@ -272,7 +272,18 @@ class Network(L.LightningModule):
         returns = batch["returns"]
         oldlogprobs = batch["logprobs"]
 
+        # Flag batch samples where the raw owned cells channel (index 5) sums to zero.
+        # If a sample has no owned cells then its loss contributions will be zero.
+        valid_mask = (obs[:, 10, :, :].sum(dim=(1, 2)) != 0).float()
+
+        # Compute network outputs
         _, newlogprobs, entropy = self(obs, masks, actions)
+
+        # Zero out the loss components of invalid samples so they have no effect.
+        # Since pg_loss involves returns and entropy_loss is an average,
+        # setting returns and entropy to zero for these samples effectively cancels their loss.
+        returns = returns * valid_mask
+        entropy = entropy * valid_mask
 
         loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, oldlogprobs, entropy, returns, args)
 
