@@ -339,7 +339,7 @@ class SelfPlayTrainer:
             # Process observations - only for player 1
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             agent1_augmented_obs = self.network.augment_observation(obs_tensor[:, 0, ...])
-            agent2_augmented_obs = self.network.augment_observation(obs_tensor[:, 1, ...])
+            agent2_augmented_obs = self.fixed_network.augment_observation(obs_tensor[:, 1, ...])
             augmented_obs = torch.stack([agent1_augmented_obs, agent2_augmented_obs], dim=1)
 
             # Process masks.
