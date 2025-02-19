@@ -339,6 +339,8 @@ class SelfPlayTrainer:
             # Process observations - only for player 1
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
             agent1_augmented_obs = self.network.augment_observation(obs_tensor[:, 0, ...])
+            agent2_augmented_obs = self.network.augment_observation(obs_tensor[:, 1, ...])
+            augmented_obs = torch.stack([agent1_augmented_obs, agent2_augmented_obs], dim=1)
 
             # Process masks.
             mask = [
@@ -365,7 +367,7 @@ class SelfPlayTrainer:
             if self.fabric.device.type == "cuda":
                 torch.cuda.synchronize()  # Ensure all tensors are ready
 
-        return agent1_augmented_obs, mask, rewards
+        return augmented_obs, mask, rewards
 
     def run(self):
         """Runs the main training loop."""
@@ -386,7 +388,7 @@ class SelfPlayTrainer:
 
                 with torch.no_grad():
                     # Get actions for player 1 (learning player)
-                    player1_obs = next_obs
+                    player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
                     player1_actions, player1_logprobs, _ = self.network(player1_obs, player1_mask)
 
