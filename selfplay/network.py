@@ -256,8 +256,7 @@ class Network(L.LightningModule):
 
     @torch.compile(dynamic=False, fullgraph=True)
     def calculate_loss(self, newlogprobs, oldlogprobs, entropy, returns, args):
-        delta = torch.clamp(newlogprobs - oldlogprobs, -20, 20) # Try clamping this
-        ratio = torch.exp(delta)
+        ratio = torch.exp(newlogprobs - oldlogprobs)
         pg_loss1 = -returns * ratio
         pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
