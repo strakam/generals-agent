@@ -40,8 +40,8 @@ class SelfPlayConfig:
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "wr90.ckpt"
     # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
-    # checkpoint_dir: str = "checkpoints/"
+    # checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
     win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
@@ -51,8 +51,8 @@ class SelfPlayConfig:
     learning_rate: float = 1.0e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.015  # Increased from 0.00 to encourage exploration
-    target_kl: float = 0.02  # Target KL divergence
+    ent_coef: float = 0.03  # Increased from 0.00 to encourage exploration
+    target_kl: float = 0.04  # Target KL divergence
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -440,12 +440,14 @@ class SelfPlayTrainer:
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
                 returns = torch.zeros_like(self.rewards)
-                next_value = torch.zeros_like(self.rewards[0])
-                next_non_terminal = 1.0 - next_done.float()
                 for t in reversed(range(self.cfg.n_steps)):
+                    if t == self.cfg.n_steps - 1:
+                        next_value = torch.zeros_like(self.rewards[0])
+                        next_non_terminal = 1.0 - next_done.float()
+                    else:
+                        next_value = returns[t + 1]
+                        next_non_terminal = 1.0 - self.dones[t+1].float()
                     returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
-                    next_value = returns[t]
-                    next_non_terminal = 1.0 - self.dones[t].float()
 
             # Calculate win/draw/loss percentages
             total_games = wins + draws + losses
