@@ -382,7 +382,7 @@ class SelfPlayTrainer:
 
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
-                self.obs[step] = next_obs  # Store player 1's observation directly
+                self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
 
@@ -399,7 +399,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions = self.fixed_network(player2_obs, player2_mask)
+                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
