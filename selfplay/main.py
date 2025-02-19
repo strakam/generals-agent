@@ -38,10 +38,10 @@ class SelfPlayConfig:
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "wr90.ckpt"
+    checkpoint_path: str = "wr75.ckpt"
     # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
-    # checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
-    checkpoint_dir: str = "checkpoints/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
     win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
@@ -397,7 +397,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions = self.fixed_network(player2_obs, player2_mask)
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
@@ -438,14 +438,12 @@ class SelfPlayTrainer:
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
                 returns = torch.zeros_like(self.rewards)
+                next_value = torch.zeros_like(self.rewards[0])
+                next_non_terminal = 1.0 - next_done.float()
                 for t in reversed(range(self.cfg.n_steps)):
-                    if t == self.cfg.n_steps - 1:
-                        next_value = torch.zeros_like(self.rewards[0])
-                        next_non_terminal = 1.0 - next_done.float()
-                    else:
-                        next_value = returns[t + 1]
-                        next_non_terminal = 1.0 - self.dones[t + 1].float()
                     returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
+                    next_value = returns[t]
+                    next_non_terminal = 1.0 - self.dones[t].float()
 
             # Calculate win/draw/loss percentages
             total_games = wins + draws + losses
