@@ -48,10 +48,10 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.0e-5  # Standard PPO learning rate
+    learning_rate: float = 0.5e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.015  # Increased from 0.00 to encourage exploration
     target_kl: float = 0.02  # Target KL divergence
 
     # Lightning fabric parameters
