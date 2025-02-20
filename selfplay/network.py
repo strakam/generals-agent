@@ -528,21 +528,17 @@ def load_fabric_checkpoint(path: str, batch_size: int, eval_mode: bool = True) -
         Network: Loaded network
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load(path, map_location=device)
+    network = torch.load(path, map_location=device)
+    print(network.keys())
+    state_dict = network["state_dict"]
 
-    # Handle both direct state dict and Fabric-style nested state dict
-    if "model" in checkpoint and isinstance(checkpoint["model"], dict):
-        state_dict = checkpoint["model"]
-    else:
-        state_dict = checkpoint
-
-    model = Network(batch_size=batch_size, compile=True)
+    model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True, batch_size=batch_size)
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
     model.load_state_dict(filtered_state_dict)
 
-    model = model.to(device)
     if eval_mode:
         model.eval()
 
+    model = model.to(device)
     return model
