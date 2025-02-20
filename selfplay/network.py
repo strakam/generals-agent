@@ -271,6 +271,13 @@ class Network(L.LightningModule):
         returns = batch["returns"]
         oldlogprobs = batch["logprobs"]
 
+        # normalize returns
+        # Compute mean and std of returns
+        returns_mean = returns.mean()
+        returns_std = returns.std()
+        # Add small epsilon to avoid division by zero
+        returns = (returns - returns_mean) / (returns_std + 1e-8)
+
         # Flag batch samples where the raw owned cells channel (index 10) sums to zero.
         # If a sample has no owned cells then its loss contributions will be zero.
         valid_mask = (obs[:, 10, :, :].sum(dim=(1, 2)) != 0).float()
