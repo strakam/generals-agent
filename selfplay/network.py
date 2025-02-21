@@ -216,6 +216,9 @@ class Network(L.LightningModule):
         representation = self.backbone(obs)
 
         square_logits_unmasked = self.square_head(representation)
+        # Apply temperature scaling to logits
+        temperature = 0.75
+        square_logits_unmasked = square_logits_unmasked / temperature
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
         # Sample square from categorical distribution

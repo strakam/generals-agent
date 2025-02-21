@@ -37,14 +37,14 @@ class GainLandRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 1024
+    n_envs: int = 256
     n_steps: int = 400
-    batch_size: int = 1024
+    batch_size: int = 256
     n_epochs: int = 4
     truncation: int = 400 # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [32, 48, 64, 64])
-    repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
+    repeats: List[int] = field(default_factory=lambda: [1, 1, 1, 1])
     checkpoint_path: str = ""
     # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
@@ -54,11 +54,11 @@ class SelfPlayConfig:
     win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
-    gamma: float = 0.995  # Discount factor
+    gamma: float = 0.95  # Discount factor
     learning_rate: float = 1.0e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.02  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
     target_kl: float = 0.02  # Target KL divergence
 
     # Lightning fabric parameters
