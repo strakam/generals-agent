@@ -37,13 +37,13 @@ class GainLandRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 800
+    n_envs: int = 1024
     n_steps: int = 400
-    batch_size: int = 800
+    batch_size: int = 1024
     n_epochs: int = 4
     truncation: int = 400 # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
+    channel_sequence: List[int] = field(default_factory=lambda: [32, 48, 64, 64])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = ""
     # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
@@ -123,7 +123,9 @@ class NeptuneLogger:
 
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    grid_factory = GridFactory(mode="generalsio")
+    # grid_factory = GridFactory(mode="generalsio")
+    min_grid_size = 24
+    grid_factory = GridFactory(min_grid_size=min_grid_size, max_grid_size=min_grid_size, mountain_density=0.2)
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -437,8 +439,8 @@ class SelfPlayTrainer:
                 if any(dones):
                     for env_idx in range(self.cfg.n_envs):
                         if dones[env_idx]:
-                            land1 += _prev_obs[env_idx, 0, 10].sum().item() / 24 / 24
-                            land2 += _prev_obs[env_idx, 1, 10].sum().item() / 24 / 24
+                            land1 += _prev_obs[env_idx, 0, 10].sum().item()
+                            land2 += _prev_obs[env_idx, 1, 10].sum().item()
                             p1_won = infos[self.agent_names[0]][env_idx][3]
                             p2_won = infos[self.agent_names[1]][env_idx][3]
                             if p1_won:
