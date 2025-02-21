@@ -131,7 +131,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=GainLandRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
