@@ -25,29 +25,37 @@ class WinLoseRewardFn(RewardFn):
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
         return float(1 * change_in_num_generals_owned)
 
+class GainLandRewardFn(RewardFn):
+    """A simple reward function. +1 if the agent gains land. -1 if they lose land."""
+
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        change_in_land_count = obs.owned_land_count - prior_obs.owned_land_count
+        return float(1 * change_in_land_count)
+
+
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 5
-    n_steps: int = 6
-    batch_size: int = 5
+    n_envs: int = 256
+    n_steps: int = 400
+    batch_size: int = 256
     n_epochs: int = 4
-    truncation: int = 600  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 400 # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
-    channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
-    repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
+    channel_sequence: List[int] = field(default_factory=lambda: [32, 48, 64, 64])
+    repeats: List[int] = field(default_factory=lambda: [1, 1, 1, 1])
     checkpoint_path: str = ""
-    checkpoint_path: str = "step=50000.ckpt"
-    # checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
-    checkpoint_dir: str = "checkpoints/"
+    # checkpoint_path: str = "checkpoints/win_rate_0.00.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.45, 0.60, 0.75, 0.90])
+    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.15, 0.30, 0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
-    gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.0e-5  # Standard PPO learning rate
+    gamma: float = 0.95  # Discount factor
+    learning_rate: float = 1.0e-4  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -115,7 +123,9 @@ class NeptuneLogger:
 
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    grid_factory = GridFactory(mode="generalsio")
+    # grid_factory = GridFactory(mode="generalsio")
+    min_grid_size = 24
+    grid_factory = GridFactory(min_grid_size=min_grid_size, max_grid_size=min_grid_size, mountain_density=0.2)
     return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
@@ -123,7 +133,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=GainLandRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
@@ -378,6 +388,7 @@ class SelfPlayTrainer:
             next_obs, mask, _ = self.process_observations(next_obs, infos)
             next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
             wins, draws, losses = 0, 0, 0
+            land1, land2 = 0, 0
 
             for step in range(0, self.cfg.n_steps):
                 global_step += self.cfg.n_envs
@@ -428,6 +439,8 @@ class SelfPlayTrainer:
                 if any(dones):
                     for env_idx in range(self.cfg.n_envs):
                         if dones[env_idx]:
+                            land1 += _prev_obs[env_idx, 0, 10].sum().item()
+                            land2 += _prev_obs[env_idx, 1, 10].sum().item()
                             p1_won = infos[self.agent_names[0]][env_idx][3]
                             p2_won = infos[self.agent_names[1]][env_idx][3]
                             if p1_won:
@@ -471,6 +484,8 @@ class SelfPlayTrainer:
                     "draw_rate": draw_rate,
                     "loss_rate": loss_rate,
                     "total_games": total_games,
+                    "land1": land1 / total_games,
+                    "land2": land2 / total_games,
                 }
             )
 

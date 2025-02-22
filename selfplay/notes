@@ -13,7 +13,11 @@ For selfplay
 - it took a lot of time (?) to train against random policy
 
 
-- argmax significantly worse than sampling?? (ppo) 
+- How to scale?
+- focus on more gpus and envs?
+- get working critic? smaller base network?
+- reward shaping?
+- something completely different? like temperature when sampling actions or e-greedy
 
 
 TODOs:
