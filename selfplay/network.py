@@ -213,7 +213,9 @@ class Network(L.LightningModule):
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
-        representation = self.backbone(obs)
+        # Use no_grad for backbone computation since it's frozen
+        with torch.no_grad():
+            representation = self.backbone(obs)
 
         square_logits_unmasked = self.square_head(representation)
         # Apply temperature scaling to logits
@@ -311,7 +313,9 @@ class Network(L.LightningModule):
         obs = self.normalize_observations(obs.float())
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
-        representation = self.backbone(obs)
+        # Use no_grad for backbone computation since it's frozen
+        with torch.no_grad():
+            representation = self.backbone(obs)
 
         # Get square logits and apply mask
         square_logits_unmasked = self.square_head(representation)
