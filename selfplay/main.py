@@ -30,9 +30,9 @@ class WinLoseRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 512
+    n_envs: int = 560
     n_steps: int = 700
-    batch_size: int = 512
+    batch_size: int = 560
     n_epochs: int = 4
     truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
@@ -215,9 +215,6 @@ class SelfPlayTrainer:
             self.fabric.save(checkpoint_path, state)
             print(f"Saved Fabric checkpoint at win rate {win_rate:.2%} to {checkpoint_path}")
 
-            # Log to Neptune
-            self.logger.log_metrics({"checkpoint/fabric_win_rate": win_rate})
-
     def check_and_save_checkpoints(self, win_rate: float):
         """Check if we've crossed any win rate thresholds and save checkpoints if needed."""
         for threshold in self.cfg.win_rate_thresholds:
@@ -337,27 +334,30 @@ class SelfPlayTrainer:
         with self.fabric.device:
             # Process observations - only for player 1
             obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
-            agent1_augmented_obs = self.network.augment_observation(obs_tensor[:, 0, ...])
-            agent2_augmented_obs = self.fixed_network.augment_observation(obs_tensor[:, 1, ...])
-            augmented_obs = torch.stack([agent1_augmented_obs, agent2_augmented_obs], dim=1)
-
-            # Process masks.
-            mask = [
-                torch.from_numpy(infos[agent_name]["masks"]).to(self.fabric.device, non_blocking=True)
-                for agent_name in self.agent_names
-            ]
-            mask = (
-                torch.stack(mask)
-                .reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
-                .to(self.fabric.device, non_blocking=True)
+            augmented_obs = torch.stack(
+                [
+                    self.network.augment_observation(obs_tensor[:, 0, ...]),
+                    self.fixed_network.augment_observation(obs_tensor[:, 1, ...]),
+                ],
+                dim=1,
             )
+            # Process masks.
+            mask = torch.stack(
+                [
+                    torch.from_numpy(infos[agent_name]["masks"]).to(self.fabric.device, non_blocking=True)
+                    for agent_name in self.agent_names
+                ],
+                dim=1,
+            ).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
 
             # Process rewards.
-            rewards = [
-                torch.from_numpy(infos[agent_name]["reward"]).to(self.fabric.device, non_blocking=True)
-                for agent_name in self.agent_names
-            ]
-            rewards = torch.stack(rewards).reshape(self.cfg.n_envs, self.n_agents)
+            rewards = torch.stack(
+                [
+                    torch.from_numpy(infos[agent_name]["reward"]).to(self.fabric.device, non_blocking=True)
+                    for agent_name in self.agent_names
+                ],
+                dim=1,
+            ).reshape(self.cfg.n_envs, self.n_agents)
         return augmented_obs, mask, rewards
 
     def run(self):
@@ -416,16 +416,11 @@ class SelfPlayTrainer:
 
                 # Track game outcomes when episodes finish
                 if any(dones):
-                    for env_idx in range(self.cfg.n_envs):
-                        if dones[env_idx]:
-                            p1_won = infos[self.agent_names[0]][env_idx][3]
-                            p2_won = infos[self.agent_names[1]][env_idx][3]
-                            if p1_won:
-                                wins += 1
-                            elif p2_won:
-                                losses += 1
-                            else:
-                                draws += 1
+                    p1_wins = infos[self.agent_names[0]]["winner"]
+                    p2_wins = infos[self.agent_names[1]]["winner"]
+                    wins += np.sum(dones & p1_wins)
+                    losses += np.sum(dones & p2_wins)
+                    draws += np.sum(dones & ~p1_wins & ~p2_wins)
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
@@ -463,7 +458,6 @@ class SelfPlayTrainer:
                     "total_games": total_games,
                 }
             )
-
             # Flatten and prepare dataset for training
             b_obs = self.obs.reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
             b_actions = self.actions.reshape(-1, 5)
