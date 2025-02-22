@@ -25,29 +25,29 @@ class WinLoseRewardFn(RewardFn):
         change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
         return float(1 * change_in_num_generals_owned)
 
+
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 5
-    n_steps: int = 6
-    batch_size: int = 5
+    n_envs: int = 512
+    n_steps: int = 700
+    batch_size: int = 512
     n_epochs: int = 4
-    truncation: int = 600  # Reduced from 1500 since 4x4 games should be shorter
+    truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = ""
     checkpoint_path: str = "step=50000.ckpt"
-    # checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
-    checkpoint_dir: str = "checkpoints/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
     win_rate_thresholds: List[float] = field(default_factory=lambda: [0.45, 0.60, 0.75, 0.90])
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.0e-5  # Standard PPO learning rate
+    learning_rate: float = 1.2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -343,8 +343,7 @@ class SelfPlayTrainer:
 
             # Process masks.
             mask = [
-                torch.from_numpy(infos[agent_name][env_idx][4]).to(self.fabric.device, non_blocking=True)
-                for env_idx in range(self.cfg.n_envs)
+                torch.from_numpy(infos[agent_name]["masks"]).to(self.fabric.device, non_blocking=True)
                 for agent_name in self.agent_names
             ]
             mask = (
@@ -354,24 +353,17 @@ class SelfPlayTrainer:
             )
 
             # Process rewards.
-            agent_rewards = []
-            for agent_name in self.agent_names:
-                rewards_agent = torch.tensor(
-                    [infos[agent_name][env_idx][5] for env_idx in range(self.cfg.n_envs)],
-                    device=self.fabric.device,
-                )
-                agent_rewards.append(rewards_agent)
-            rewards = torch.stack(agent_rewards, dim=1)
-
-            if self.fabric.device.type == "cuda":
-                torch.cuda.synchronize()  # Ensure all tensors are ready
-
+            rewards = [
+                torch.from_numpy(infos[agent_name]["reward"]).to(self.fabric.device, non_blocking=True)
+                for agent_name in self.agent_names
+            ]
+            rewards = torch.stack(rewards).reshape(self.cfg.n_envs, self.n_agents)
         return augmented_obs, mask, rewards
 
     def run(self):
         """Runs the main training loop."""
-
-        global_step = 0
+        # Pre-allocate action arrays to avoid repeated numpy allocations
+        _actions = np.empty((self.cfg.n_envs, 2, 5), dtype=np.int32)
 
         for iteration in range(1, self.cfg.training_iterations + 1):
             next_obs, infos = self.envs.reset()
@@ -380,16 +372,16 @@ class SelfPlayTrainer:
             wins, draws, losses = 0, 0, 0
 
             for step in range(0, self.cfg.n_steps):
-                global_step += self.cfg.n_envs
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
 
-                with torch.no_grad():
+                with torch.no_grad(), self.fabric.device:
                     # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
                     player1_actions, player1_logprobs, _ = self.network(player1_obs, player1_mask)
+                    _actions[:, 0] = player1_actions.cpu().numpy()
 
                     # Store player 1's actions and logprobs
                     self.actions[step] = player1_actions
@@ -399,6 +391,7 @@ class SelfPlayTrainer:
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
                     player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
+                    _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
@@ -411,9 +404,6 @@ class SelfPlayTrainer:
                         }
                     )
 
-                # Combine actions for environment step
-                _actions = torch.stack([player1_actions, player2_actions], dim=1).cpu().numpy().astype(int)
-                _prev_obs = next_obs.clone()
                 next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
 
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
