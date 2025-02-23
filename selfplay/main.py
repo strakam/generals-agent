@@ -38,7 +38,7 @@ class SelfPlayConfig:
     grid_size: int = 23  # Already set to 4
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "step=50000.ckpt"
+    checkpoint_path: str = "winrate_0.45.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
     # checkpoint_dir: str = "checkpoints/"
 
