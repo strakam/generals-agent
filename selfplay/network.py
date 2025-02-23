@@ -219,7 +219,7 @@ class Network(L.LightningModule):
 
         square_logits_unmasked = self.square_head(representation)
         # Apply temperature scaling to logits
-        temperature = 0.9
+        temperature = 0.8
         square_logits_unmasked = square_logits_unmasked / temperature
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
@@ -275,6 +275,11 @@ class Network(L.LightningModule):
         actions = batch["actions"]
         returns = batch["returns"]
         oldlogprobs = batch["logprobs"]
+
+        # reward normalization
+        returns_mean = returns.mean()
+        returns_std = returns.std()
+        returns = (returns - returns_mean) / (returns_std + 1e-8)
 
         # Flag batch samples where the raw owned cells channel (index 10) sums to zero.
         # If a sample has no owned cells then its loss contributions will be zero.
