@@ -23,7 +23,5 @@ For selfplay
 
 TODOs:
 - checkpointing
-- eval vs OG
-- add shared memory for async env? -- tried, looks like yes
 - try moving env.reset() outside
-- revert normalization as now i use experimental one
+- implement average game length

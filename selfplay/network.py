@@ -219,7 +219,7 @@ class Network(L.LightningModule):
 
         square_logits_unmasked = self.square_head(representation)
         # Apply temperature scaling to logits
-        temperature = 0.8
+        temperature = 0.9
         square_logits_unmasked = square_logits_unmasked / temperature
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
@@ -280,9 +280,9 @@ class Network(L.LightningModule):
         zero_return_mask = (returns == 0.0).float()
 
         # reward normalization
-        returns_mean = returns.mean()
-        returns_std = returns.std()
-        returns = (returns - returns_mean) / (returns_std + 1e-8)
+        # returns_mean = returns.mean()
+        # returns_std = returns.std()
+        # returns = (returns - returns_mean) / (returns_std + 1e-8)
 
         # Flag batch samples where the raw owned cells channel (index 10) sums to zero.
         # If a sample has no owned cells then its loss contributions will be zero.
@@ -557,12 +557,12 @@ def load_fabric_checkpoint(path: str, batch_size: int, eval_mode: bool = True) -
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(path, map_location=device)
-    
+
     model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True, batch_size=batch_size)
-    
+
     # The checkpoint["model"] is already a state dict, no need to call .state_dict()
     state_dict = checkpoint["model"]
-    
+
     # Filter and load state dict
     model_keys = model.state_dict().keys()
     filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
