@@ -376,10 +376,10 @@ class SelfPlayTrainer:
         # Pre-allocate action arrays to avoid repeated numpy allocations
         _actions = np.empty((self.cfg.n_envs, 2, 5), dtype=np.int32)
 
+        next_obs, infos = self.envs.reset()
+        next_obs, mask, _ = self.process_observations(next_obs, infos)
+        next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
         for iteration in range(1, self.cfg.training_iterations + 1):
-            next_obs, infos = self.envs.reset()
-            next_obs, mask, _ = self.process_observations(next_obs, infos)
-            next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
             wins, draws, losses = 0, 0, 0
 
             for step in range(0, self.cfg.n_steps):
