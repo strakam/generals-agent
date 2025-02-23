@@ -18,6 +18,7 @@ For selfplay
 - get working critic? smaller base network?
 - reward shaping?
 - something completely different? like temperature when sampling actions or e-greedy
+- data augmentation such as flips
 
 
 TODOs:

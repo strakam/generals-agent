@@ -30,9 +30,9 @@ class WinLoseRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 560
+    n_envs: int = 600
     n_steps: int = 700
-    batch_size: int = 560
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
     grid_size: int = 23  # Already set to 4
@@ -390,7 +390,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
+                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
