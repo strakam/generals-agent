@@ -43,7 +43,9 @@ class SelfPlayConfig:
     # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(default_factory=lambda: [0.45, 0.60, 0.75, 0.90])
+    win_rate_thresholds: List[float] = field(
+        default_factory=lambda: [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
+    )
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor

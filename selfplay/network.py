@@ -219,7 +219,7 @@ class Network(L.LightningModule):
 
         square_logits_unmasked = self.square_head(representation)
         # Apply temperature scaling to logits
-        temperature = 0.75
+        temperature = 0.9
         square_logits_unmasked = square_logits_unmasked / temperature
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
