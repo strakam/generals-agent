@@ -189,6 +189,15 @@ class SelfPlayTrainer:
         self.rewards_shape = (cfg.n_steps, cfg.n_envs)
         self.dones_shape = (cfg.n_steps, cfg.n_envs)
 
+        self.obs_buffer = torch.empty(
+            (cfg.n_envs, self.n_agents, 15, 24, 24),
+            dtype=torch.float32,
+            pin_memory=torch.cuda.is_available(),
+        )
+        self.mask_buffer = torch.empty(
+            (cfg.n_envs, self.n_agents, 24, 24, 4), dtype=torch.bool, pin_memory=torch.cuda.is_available()
+        )
+
         with self.fabric.device:
             device = self.fabric.device
             self.obs = torch.zeros(self.obs_shape, dtype=torch.float32, device=device)
@@ -335,22 +344,21 @@ class SelfPlayTrainer:
         """
         with self.fabric.device:
             # Process observations - only for player 1
-            obs_tensor = torch.from_numpy(obs).to(self.fabric.device, non_blocking=True)
+            self.obs_buffer.copy_(torch.from_numpy(obs))
+            self.obs_buffer = self.obs_buffer.to(self.fabric.device, non_blocking=True)
+
             augmented_obs = torch.stack(
                 [
-                    self.network.augment_observation(obs_tensor[:, 0, ...]),
-                    self.fixed_network.augment_observation(obs_tensor[:, 1, ...]),
+                    self.network.augment_observation(self.obs_buffer[:, 0, ...]),
+                    self.fixed_network.augment_observation(self.obs_buffer[:, 1, ...]),
                 ],
                 dim=1,
             )
+
             # Process masks.
-            mask = torch.stack(
-                [
-                    torch.from_numpy(infos[agent_name]["masks"]).to(self.fabric.device, non_blocking=True)
-                    for agent_name in self.agent_names
-                ],
-                dim=1,
-            ).reshape(self.cfg.n_envs, self.n_agents, 24, 24, 4)
+            for i, agent_name in enumerate(self.agent_names):
+                self.mask_buffer[:, i].copy_(torch.from_numpy(infos[agent_name]["masks"]))
+            self.mask_buffer = self.mask_buffer.to(self.fabric.device, non_blocking=True)
 
             # Process rewards.
             rewards = torch.stack(
@@ -360,7 +368,8 @@ class SelfPlayTrainer:
                 ],
                 dim=1,
             ).reshape(self.cfg.n_envs, self.n_agents)
-        return augmented_obs, mask, rewards
+
+        return augmented_obs, self.mask_buffer, rewards
 
     def run(self):
         """Runs the main training loop."""
