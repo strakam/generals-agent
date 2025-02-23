@@ -49,7 +49,7 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.2e-5  # Standard PPO learning rate
+    learning_rate: float = 1.4e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration

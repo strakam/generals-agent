@@ -276,6 +276,9 @@ class Network(L.LightningModule):
         returns = batch["returns"]
         oldlogprobs = batch["logprobs"]
 
+        # Remember which indices have zero returns for later masking
+        zero_return_mask = (returns == 0.0).float()
+
         # reward normalization
         returns_mean = returns.mean()
         returns_std = returns.std()
@@ -290,8 +293,12 @@ class Network(L.LightningModule):
         generals = obs[:, 6, :, :] > 0
         # Count locations where both owned cells and generals overlap
         num_owned_generals = ((owned_cells & generals).float().sum(dim=(1, 2)) > 1).float()
+
         # Zero out samples where player owns multiple generals
         valid_mask = valid_mask * (1 - num_owned_generals)
+
+        # Zero out samples where there is zero return
+        valid_mask = valid_mask * (1 - zero_return_mask)
 
         # Compute network outputs
         _, newlogprobs, entropy = self(obs, masks, actions)
