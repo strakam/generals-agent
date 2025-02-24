@@ -13,7 +13,7 @@ from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
-from network import load_fabric_checkpoint, Network
+from network import load_network, Network, load_fabric_checkpoint
 
 torch.set_float32_matmul_precision("medium")
 
@@ -49,7 +49,7 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.4e-5  # Standard PPO learning rate
+    learning_rate: float = 4e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -274,7 +274,6 @@ class SelfPlayTrainer:
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
 
                 loss, pg_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
-                oldlogprobs = batch["logprobs"]
 
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
@@ -305,13 +304,10 @@ class SelfPlayTrainer:
                         "train/learning_rate": current_lr,
                         "train/loss": loss.item(),
                         "train/ratio": ratio.mean().item(),
-                        "train/logratio": logratio.mean().item(),
                         "train/policy_loss": pg_loss.mean().item(),
                         "train/entropy": entropy_loss.mean().item(),
                         "train/clipfrac": clipfrac.item(),
                         "train/approx_kl": approx_kl.item(),
-                        "train/newlogprobs": newlogprobs.mean().item(),
-                        "train/oldlogprobs": oldlogprobs.mean().item(),
                     }
                 )
 
@@ -323,11 +319,7 @@ class SelfPlayTrainer:
                         "entropy": f"{entropy_loss.mean().item():.3f}",
                         "clipfrac": f"{clipfrac.item():.3f}",
                         "approx_kl": f"{approx_kl.item():.3f}",
-                        "logratio": f"{logratio.mean().item():.3f}",
                         "ratio": f"{ratio.mean().item():.3f}",
-                        "min_ratio": f"{ratio.min().item():.3f}",
-                        "newlogprobs": f"{newlogprobs.mean().item():.3f}",
-                        "oldlogprobs": f"{oldlogprobs.mean().item():.3f}",
                     }
                 )
 
@@ -377,10 +369,11 @@ class SelfPlayTrainer:
         _actions = np.empty((self.cfg.n_envs, 2, 5), dtype=np.int32)
 
         next_obs, infos = self.envs.reset()
+        prev_obs = next_obs
         next_obs, mask, _ = self.process_observations(next_obs, infos)
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
         for iteration in range(1, self.cfg.training_iterations + 1):
-            wins, draws, losses = 0, 0, 0
+            wins, draws, losses, avg_game_length = 0, 0, 0, 0
 
             for step in range(0, self.cfg.n_steps):
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
@@ -416,22 +409,24 @@ class SelfPlayTrainer:
                     )
 
                 next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
-
-                next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
-
-                # Store only player 1's rewards
-                self.rewards[step] = step_rewards[:, 0]
-
                 dones = np.logical_or(terminations, truncations)
                 next_done = torch.tensor(dones, device=self.fabric.device)
 
                 # Track game outcomes when episodes finish
                 if any(dones):
+                    game_times = prev_obs[:, 0, 13, 0, 0]  # Get game times from observations
                     p1_wins = infos[self.agent_names[0]]["winner"]
                     p2_wins = infos[self.agent_names[1]]["winner"]
                     wins += np.sum(dones & p1_wins)
                     losses += np.sum(dones & p2_wins)
                     draws += np.sum(dones & ~p1_wins & ~p2_wins)
+                    # Calculate total game time for completed games
+                    avg_game_length += np.sum(game_times[dones])
+                prev_obs = next_obs
+
+                next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
+                self.rewards[step] = step_rewards[:, 0]
+
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
@@ -449,15 +444,17 @@ class SelfPlayTrainer:
                 win_rate = wins / total_games
                 draw_rate = draws / total_games
                 loss_rate = losses / total_games
+                avg_game_length = avg_game_length / total_games  # Calculate average game length
 
                 # Check if we should save a checkpoint
                 self.check_and_save_checkpoints(win_rate)
             else:
-                win_rate = draw_rate = loss_rate = 0.0
+                win_rate = draw_rate = loss_rate = avg_game_length = 0.0
 
             self.fabric.print(
                 f"Iteration {iteration} stats - "
                 f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
+                f"Avg Game Length = {avg_game_length:.1f}; "
                 f"Total games: {total_games}"
             )
 
@@ -466,6 +463,7 @@ class SelfPlayTrainer:
                     "win_rate": win_rate,
                     "draw_rate": draw_rate,
                     "loss_rate": loss_rate,
+                    "avg_game_length": avg_game_length,
                     "total_games": total_games,
                 }
             )
