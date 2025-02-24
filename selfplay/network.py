@@ -277,9 +277,9 @@ class Network(L.LightningModule):
         zero_return_mask = (returns == 0.0).float()
 
         # reward normalization
-        # returns_mean = returns.mean()
-        # returns_std = returns.std()
-        # returns = (returns - returns_mean) / (returns_std + 1e-8)
+        returns_mean = returns.mean()
+        returns_std = returns.std()
+        returns = (returns - returns_mean) / (returns_std + 1e-8)
 
         # Flag batch samples where the raw owned cells channel (index 10) sums to zero.
         # If a sample has no owned cells then its loss contributions will be zero.

@@ -5,6 +5,10 @@ Variance Reduction:
 - Reward shaping - is it dangerous or lez go?
 
 
+TO FIGURE OUT
+- temperature / no-reset / learning rate
+
+
 For selfplay
 - set good n_steps value (700 sounds nice)
 - make actions end-to-end without conditioning -> + increased confidence that PPO is correct, - much larger action space (is it?) - probably not a good idea
