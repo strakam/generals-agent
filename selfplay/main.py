@@ -44,7 +44,7 @@ class SelfPlayConfig:
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
     win_rate_thresholds: List[float] = field(
-        default_factory=lambda: [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
+        default_factory=lambda: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
     )
 
     # PPO parameters
@@ -118,7 +118,7 @@ class NeptuneLogger:
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     grid_factory = GridFactory(mode="generalsio")
-    return gym.vector.AsyncVectorEnv(
+    return gym.vector.SyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
                 agents=agent_names,
@@ -129,7 +129,6 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
             )
             for _ in range(cfg.n_envs)
         ],
-        shared_memory=True,
     )
 
 
