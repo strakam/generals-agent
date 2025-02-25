@@ -26,6 +26,37 @@ class WinLoseRewardFn(RewardFn):
         return float(1 * change_in_num_generals_owned)
 
 
+class ShapedRewardFn(RewardFn):
+    """A reward function that shapes the reward based on the number of generals owned."""
+
+    def __init__(self, clip_value: float = 1.7, shaping_weight: float = 0.7):
+        self.minimum_ratio = 1 / clip_value
+        self.maximum_ratio = clip_value
+        self.shaping_weight = shaping_weight
+
+    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
+        if opponent_army > 0:
+            ratio = my_army / opponent_army
+            if ratio > self.maximum_ratio:
+                return 1.0
+            elif ratio < self.minimum_ratio:
+                return -1.0
+            else:
+                return (ratio - self.minimum_ratio) / (self.maximum_ratio - self.minimum_ratio) * 2 - 1
+        return 0.0
+
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+
+        prev_my_army = prior_obs.owned_army_count
+        prev_opponent_army = prior_obs.opponent_army_count
+
+        prev_ratio_reward = self.calculate_ratio_reward(prev_my_army, prev_opponent_army)
+        current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
+
+        return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+
+
 @dataclass
 class SelfPlayConfig:
     # Training parameters
@@ -127,7 +158,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=ShapedRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
@@ -142,7 +173,7 @@ class SelfPlayTrainer:
         self.cfg = cfg
         # Track self-play iterations
         self.self_play_iteration = 0
-        
+
         # Initialize Fabric and seed the experiment.
         self.fabric = Fabric(
             accelerator=cfg.accelerator,
@@ -429,7 +460,6 @@ class SelfPlayTrainer:
                 next_obs, mask, step_rewards = self.process_observations(next_obs, infos)
                 self.rewards[step] = step_rewards[:, 0]
 
-
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
                 returns = torch.zeros_like(self.rewards)
@@ -453,7 +483,9 @@ class SelfPlayTrainer:
 
                 # If win rate exceeds threshold, update fixed network to current network
                 if win_rate >= self.cfg.winrate_threshold:
-                    self.fabric.print(f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.winrate_threshold:.2%}, updating fixed network")
+                    self.fabric.print(
+                        f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.winrate_threshold:.2%}, updating fixed network"
+                    )
                     self.fixed_network.load_state_dict(self.network.state_dict())
                     self.self_play_iteration += 1
 
@@ -520,10 +552,10 @@ def clean_checkpoint(checkpoint_path, output_path=None):
     # Load the checkpoint from the specified file.
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     print(checkpoint.keys())
-    
+
     # Create a new structure with 'model' instead of 'state_dict'
     new_checkpoint = {}
-    
+
     # Check if state_dict exists and rename it to model
     if "state_dict" in checkpoint:
         print("Renaming 'state_dict' to 'model' for compatibility with load_fabric_checkpoint")
@@ -531,7 +563,7 @@ def clean_checkpoint(checkpoint_path, output_path=None):
     else:
         print("No 'state_dict' key found in checkpoint.")
         return
-        
+
     # Copy any other fields you want to keep
     fields_to_keep = ["optimizer_states"]  # Add any other fields you want to keep
     for field in fields_to_keep:
