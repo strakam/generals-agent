@@ -39,7 +39,7 @@ class SelfPlayConfig:
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "supervised.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints2/"
     # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
@@ -47,7 +47,7 @@ class SelfPlayConfig:
         default_factory=lambda: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
     )
 
-    winrate_threshold: float = 0.60
+    winrate_threshold: float = 0.55
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
