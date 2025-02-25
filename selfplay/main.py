@@ -120,7 +120,7 @@ class NeptuneLogger:
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     grid_factory = GridFactory(mode="generalsio")
-    return gym.vector.SyncVectorEnv(
+    return gym.vector.AsyncVectorEnv(
         [
             lambda: GymnasiumGenerals(
                 agents=agent_names,
@@ -131,6 +131,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
             )
             for _ in range(cfg.n_envs)
         ],
+        shared_memory=True,
     )
 
 
