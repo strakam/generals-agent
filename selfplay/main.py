@@ -34,11 +34,11 @@ class SelfPlayConfig:
     n_steps: int = 700
     batch_size: int = 600
     n_epochs: int = 4
-    truncation: int = 700  # Reduced from 1500 since 4x4 games should be shorter
-    grid_size: int = 23  # Already set to 4
+    truncation: int = 700
+    grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "winrate_0.45.ckpt"
+    checkpoint_path: str = "supervised.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints/"
     # checkpoint_dir: str = "checkpoints/"
 
@@ -47,9 +47,11 @@ class SelfPlayConfig:
         default_factory=lambda: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
     )
 
+    winrate_threshold: float = 0.60
+
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 4e-5  # Standard PPO learning rate
+    learning_rate: float = 1.5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -137,9 +139,9 @@ class SelfPlayTrainer:
 
     def __init__(self, cfg: SelfPlayConfig):
         self.cfg = cfg
-        # Track which win rate thresholds we've already saved checkpoints for
-        self.saved_thresholds = set()
-
+        # Track self-play iterations
+        self.self_play_iteration = 0
+        
         # Initialize Fabric and seed the experiment.
         self.fabric = Fabric(
             accelerator=cfg.accelerator,
@@ -206,10 +208,10 @@ class SelfPlayTrainer:
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
 
-    def save_checkpoint(self, win_rate: float, threshold: float):
-        """Save a checkpoint in Fabric format when crossing a win rate threshold."""
+    def save_checkpoint(self, iteration: int):
+        """Save a checkpoint in Fabric format for the current self-play iteration."""
         if self.fabric.is_global_zero:  # Only save on main process
-            checkpoint_name = f"winrate_{threshold:.2f}.ckpt"
+            checkpoint_name = f"cp_{iteration}.ckpt"
             checkpoint_path = f"{self.cfg.checkpoint_dir}/{checkpoint_name}"
 
             # Create checkpoint directory if it doesn't exist
@@ -223,7 +225,7 @@ class SelfPlayTrainer:
 
             # Let Fabric handle the saving
             self.fabric.save(checkpoint_path, state)
-            print(f"Saved Fabric checkpoint at win rate {win_rate:.2%} to {checkpoint_path}")
+            print(f"Saved Fabric checkpoint for self-play iteration {iteration} to {checkpoint_path}")
 
     def check_and_save_checkpoints(self, win_rate: float):
         """Check if we've crossed any win rate thresholds and save checkpoints if needed."""
@@ -393,7 +395,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -445,8 +447,17 @@ class SelfPlayTrainer:
                 loss_rate = losses / total_games
                 avg_game_length = avg_game_length / total_games  # Calculate average game length
 
-                # Check if we should save a checkpoint
-                self.check_and_save_checkpoints(win_rate)
+                # # Check if we should save a checkpoint
+                # self.check_and_save_checkpoints(win_rate)
+
+                # If win rate exceeds threshold, update fixed network to current network
+                if win_rate >= self.cfg.winrate_threshold:
+                    self.fabric.print(f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.winrate_threshold:.2%}, updating fixed network")
+                    self.fixed_network.load_state_dict(self.network.state_dict())
+                    self.self_play_iteration += 1
+
+                    self.save_checkpoint(self.self_play_iteration)
+
             else:
                 win_rate = draw_rate = loss_rate = avg_game_length = 0.0
 
@@ -454,7 +465,8 @@ class SelfPlayTrainer:
                 f"Iteration {iteration} stats - "
                 f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
                 f"Avg Game Length = {avg_game_length:.1f}; "
-                f"Total games: {total_games}"
+                f"Total games: {total_games}; "
+                f"Self-play iteration: {self.self_play_iteration}"
             )
 
             self.logger.log_metrics(
@@ -464,6 +476,7 @@ class SelfPlayTrainer:
                     "loss_rate": loss_rate,
                     "avg_game_length": avg_game_length,
                     "total_games": total_games,
+                    "self_play_iteration": self.self_play_iteration,
                 }
             )
             # Flatten and prepare dataset for training
@@ -494,22 +507,41 @@ def main(args):
 
 def clean_checkpoint(checkpoint_path, output_path=None):
     """
-    Loads a checkpoint, removes the config object and threshold-related fields, and re-saves it.
+    Loads a checkpoint, removes the config object and threshold-related fields,
+    renames 'state_dict' to 'model', and re-saves it for compatibility with load_fabric_checkpoint.
 
     Args:
         checkpoint_path (str): Path to the original checkpoint file.
         output_path (str, optional): Path to save the cleaned checkpoint.
                                      If not provided, will overwrite the original.
     """
+    print(f"Cleaning checkpoint from {checkpoint_path} to {output_path}")
     # Load the checkpoint from the specified file.
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    print(checkpoint.keys())
+    
+    # Create a new structure with 'model' instead of 'state_dict'
+    new_checkpoint = {}
+    
+    # Check if state_dict exists and rename it to model
+    if "state_dict" in checkpoint:
+        print("Renaming 'state_dict' to 'model' for compatibility with load_fabric_checkpoint")
+        new_checkpoint["model"] = checkpoint["state_dict"]
+    else:
+        print("No 'state_dict' key found in checkpoint.")
+        return
+        
+    # Copy any other fields you want to keep
+    fields_to_keep = ["optimizer_states"]  # Add any other fields you want to keep
+    for field in fields_to_keep:
+        if field in checkpoint:
+            new_checkpoint[field] = checkpoint[field]
 
     # Remove the problematic fields if they exist
     fields_to_remove = ["config", "threshold", "saved_thresholds"]
     for field in fields_to_remove:
         if field in checkpoint:
-            print(f"Removing '{field}' from checkpoint.")
-            del checkpoint[field]
+            print(f"Not copying '{field}' to new checkpoint.")
         else:
             print(f"No '{field}' key found in checkpoint.")
 
@@ -518,8 +550,8 @@ def clean_checkpoint(checkpoint_path, output_path=None):
         output_path = checkpoint_path
 
     # Save the cleaned checkpoint.
-    torch.save(checkpoint, output_path)
-    print(f"Checkpoint successfully saved to '{output_path}' without the removed fields.")
+    torch.save(new_checkpoint, output_path)
+    print(f"Checkpoint successfully saved to '{output_path}' with 'state_dict' renamed to 'model'.")
 
 
 if __name__ == "__main__":
