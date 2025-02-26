@@ -30,19 +30,14 @@ class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
 
     def __init__(self, clip_value: float = 1.7, shaping_weight: float = 0.7):
-        self.minimum_ratio = 1 / clip_value
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
         if opponent_army > 0:
             ratio = my_army / opponent_army
-            if ratio > self.maximum_ratio:
-                return 1.0
-            elif ratio < self.minimum_ratio:
-                return -1.0
-            else:
-                return (ratio - self.minimum_ratio) / (self.maximum_ratio - self.minimum_ratio) * 2 - 1
+            ratio = np.log(ratio) / np.log(self.maximum_ratio)
+            return np.min(np.max(ratio, -1.0), 1.0)
         return 0.0
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
@@ -69,8 +64,8 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "supervised.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints2/"
+    checkpoint_path: str = "cp_2.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints5/"
     # checkpoint_dir: str = "checkpoints/"
 
     # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
@@ -78,14 +73,14 @@ class SelfPlayConfig:
         default_factory=lambda: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
     )
 
-    winrate_threshold: float = 0.55
+    winrate_threshold: float = 0.53
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    learning_rate: float = 1.5e-5  # Standard PPO learning rate
+    learning_rate: float = 1.5e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     target_kl: float = 0.02  # Target KL divergence
 
     # Lightning fabric parameters
@@ -158,7 +153,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=ShapedRewardFn(),
+                reward_fn=WinLoseRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
