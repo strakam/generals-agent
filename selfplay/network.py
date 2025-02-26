@@ -273,7 +273,7 @@ class Network(L.LightningModule):
         entropy_loss = entropy.mean()
 
         # Total loss
-        loss = pg_loss + value_loss * 0.5 - args.ent_coef * entropy_loss
+        loss = pg_loss + args.vf_coef * value_loss - args.ent_coef * entropy_loss
         return loss, pg_loss, value_loss, entropy_loss, ratio
 
     def training_step(self, batch, args):

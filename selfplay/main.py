@@ -37,7 +37,7 @@ class ShapedRewardFn(RewardFn):
         if opponent_army > 0:
             ratio = my_army / opponent_army
             ratio = np.log(ratio) / np.log(self.maximum_ratio)
-            return np.min(np.max(ratio, -1.0), 1.0)
+            return np.minimum(np.maximum(ratio, -1.0), 1.0)
         return 0.0
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
@@ -55,24 +55,19 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 600
-    n_steps: int = 700
-    batch_size: int = 600
+    n_envs: int = 800
+    n_steps: int = 500
+    batch_size: int = 400
     n_epochs: int = 4
-    truncation: int = 700
+    truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "supervised.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints5/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay/"
     # checkpoint_dir: str = "checkpoints/"
 
-    # Win rate thresholds for checkpointing (15%, 30%, 45%, etc.)
-    win_rate_thresholds: List[float] = field(
-        default_factory=lambda: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
-    )
-
-    winrate_threshold: float = 0.53
+    winrate_threshold: float = 0.55
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -81,6 +76,7 @@ class SelfPlayConfig:
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
+    vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 
@@ -154,7 +150,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=ShapedRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
