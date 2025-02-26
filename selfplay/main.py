@@ -29,7 +29,7 @@ class WinLoseRewardFn(RewardFn):
 class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
 
-    def __init__(self, clip_value: float = 1.7, shaping_weight: float = 0.7):
+    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
 
@@ -51,7 +51,6 @@ class ShapedRewardFn(RewardFn):
 
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
 
-
 @dataclass
 class SelfPlayConfig:
     # Training parameters
@@ -64,7 +63,7 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "cp_2.ckpt"
+    checkpoint_path: str = "supervised.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay_checkpoints5/"
     # checkpoint_dir: str = "checkpoints/"
 
@@ -77,11 +76,13 @@ class SelfPlayConfig:
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
+    gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 1.5e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     target_kl: float = 0.02  # Target KL divergence
+    norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -213,6 +214,7 @@ class SelfPlayTrainer:
         self.obs_shape = (cfg.n_steps, cfg.n_envs, self.n_channels, 24, 24)
         self.masks_shape = (cfg.n_steps, cfg.n_envs, 24, 24, 4)
         self.actions_shape = (cfg.n_steps, cfg.n_envs, 5)
+        self.values_shape = (cfg.n_steps, cfg.n_envs)
         self.logprobs_shape = (cfg.n_steps, cfg.n_envs)
         self.rewards_shape = (cfg.n_steps, cfg.n_envs)
         self.dones_shape = (cfg.n_steps, cfg.n_envs)
@@ -231,6 +233,7 @@ class SelfPlayTrainer:
             self.obs = torch.zeros(self.obs_shape, dtype=torch.float32, device=device)
             self.actions = torch.zeros(self.actions_shape, dtype=torch.float32, device=device)
             self.logprobs = torch.zeros(self.logprobs_shape, dtype=torch.float32, device=device)
+            self.values = torch.zeros(self.values_shape, dtype=torch.float32, device=device)
             self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32, device=device)
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
@@ -301,7 +304,7 @@ class SelfPlayTrainer:
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
 
-                loss, pg_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
+                loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
 
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
@@ -333,6 +336,7 @@ class SelfPlayTrainer:
                         "train/loss": loss.item(),
                         "train/ratio": ratio.mean().item(),
                         "train/policy_loss": pg_loss.mean().item(),
+                        "train/value_loss": value_loss.mean().item(),
                         "train/entropy": entropy_loss.mean().item(),
                         "train/clipfrac": clipfrac.item(),
                         "train/approx_kl": approx_kl.item(),
@@ -344,6 +348,7 @@ class SelfPlayTrainer:
                     {
                         "loss": f"{loss.item():.3f}",
                         "policy_loss": f"{pg_loss.mean().item():.3f}",
+                        "value_loss": f"{value_loss.mean().item():.3f}",
                         "entropy": f"{entropy_loss.mean().item():.3f}",
                         "clipfrac": f"{clipfrac.item():.3f}",
                         "approx_kl": f"{approx_kl.item():.3f}",
@@ -412,17 +417,18 @@ class SelfPlayTrainer:
                     # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
-                    player1_actions, player1_logprobs, _ = self.network(player1_obs, player1_mask)
+                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask)
                     _actions[:, 0] = player1_actions.cpu().numpy()
 
-                    # Store player 1's actions and logprobs
+                    # Store player 1's actions, values, and logprobs
                     self.actions[step] = player1_actions
+                    self.values[step] = player1_value
                     self.logprobs[step] = player1_logprobs
-
+                    
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _ = self.fixed_network(player2_obs, player2_mask)
+                    player2_actions, _, _, _ = self.fixed_network(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -457,13 +463,33 @@ class SelfPlayTrainer:
 
             # Compute returns after collecting rollout.
             with torch.no_grad(), self.fabric.device:
-                returns = torch.zeros_like(self.rewards)
-                next_value = torch.zeros_like(self.rewards[0])
-                next_non_terminal = 1.0 - next_done.float()
+                # Get the value estimate for next observation from player 1's network
+                player1_next_obs = next_obs[:, 0]
+                player1_next_mask = mask[:, 0]
+                _, next_value, _, _ = self.network(player1_next_obs, player1_next_mask)
+                next_value = next_value.reshape(1, -1)
+                
+                # Initialize advantages tensor
+                advantages = torch.zeros_like(self.rewards).to(self.fabric.device)
+                lastgaelam = 0
+                
+                # Calculate advantages using GAE
                 for t in reversed(range(self.cfg.n_steps)):
-                    returns[t] = self.rewards[t] + self.cfg.gamma * next_value * next_non_terminal
-                    next_value = returns[t]
-                    next_non_terminal = 1.0 - self.dones[t].float()
+                    if t == self.cfg.n_steps - 1:
+                        nextnonterminal = 1.0 - next_done.float()
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - self.dones[t + 1].float()
+                        nextvalues = self.values[t + 1]
+                    
+                    # GAE formula: δ_t = r_t + γV(s_{t+1}) - V(s_t)
+                    delta = self.rewards[t] + self.cfg.gamma * nextvalues * nextnonterminal - self.values[t]
+                    
+                    # A_t = δ_t + γλA_{t+1}
+                    advantages[t] = lastgaelam = delta + self.cfg.gamma * self.cfg.gae_lambda * nextnonterminal * lastgaelam
+                
+                # Compute returns as advantage + value (for value function loss)
+                returns = advantages + self.values
 
             # Calculate win/draw/loss percentages
             total_games = wins + draws + losses
@@ -510,14 +536,18 @@ class SelfPlayTrainer:
             # Flatten and prepare dataset for training
             b_obs = self.obs.reshape(self.cfg.n_steps * self.cfg.n_envs, -1, 24, 24)
             b_actions = self.actions.reshape(-1, 5)
+            b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
+            b_values = self.values.reshape(-1)
             b_logprobs = self.logprobs.reshape(-1)
             b_masks = self.masks.reshape(-1, 24, 24, 4)
 
             dataset = {
                 "observations": b_obs,
                 "actions": b_actions,
+                "advantages": b_advantages,
                 "returns": b_returns,
+                "values": b_values,
                 "logprobs": b_logprobs,
                 "masks": b_masks,
             }

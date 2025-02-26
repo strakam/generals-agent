@@ -42,14 +42,14 @@ class Network(L.LightningModule):
             nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
         )
 
-        self.value_head = nn.Sequential(
-            Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(24 * 24, 1),
-            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
-        )
+        # self.value_head = nn.Sequential(
+        #     Pyramid(final_channels, [], []),
+        #     nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.Flatten(),
+        #     nn.Linear(24 * 24, 1),
+        #     Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
+        # )
 
         self.square_loss = nn.CrossEntropyLoss()
         self.direction_loss = nn.CrossEntropyLoss()
@@ -58,7 +58,7 @@ class Network(L.LightningModule):
             self.backbone = torch.compile(self.backbone, fullgraph=True, dynamic=False)
             self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
-            self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
+            # self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
     @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):
@@ -217,8 +217,6 @@ class Network(L.LightningModule):
         with torch.no_grad():
             representation = self.backbone(obs)
 
-        value = self.value_head(representation).flatten()
-
         square_logits_unmasked = self.square_head(representation)
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
 
@@ -256,39 +254,32 @@ class Network(L.LightningModule):
         action = torch.stack([zeros, i, j, direction, zeros], dim=1)
         action[action[:, 3] == 4, 0] = 1  # pass action
 
-        return action, value, logprob, entropy
+        return action, logprob, entropy
 
     @torch.compile(dynamic=False, fullgraph=True)
-    def calculate_loss(self, newlogprobs, oldlogprobs, entropy, advantages, returns, values, newvalues, args):
-        # Policy loss calculation using advantages
+    def calculate_loss(self, newlogprobs, oldlogprobs, entropy, returns, args):
         ratio = torch.exp(newlogprobs - oldlogprobs)
-        pg_loss1 = -advantages * ratio
-        pg_loss2 = -advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+        pg_loss1 = -returns * ratio
+        pg_loss2 = -returns * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-        # Value loss calculation
-        value_loss = 0.5 * ((newvalues - returns) ** 2).mean()
-
-        # Entropy loss
         entropy_loss = entropy.mean()
-
-        # Total loss
-        loss = pg_loss + value_loss * 0.5 - args.ent_coef * entropy_loss
-        return loss, pg_loss, value_loss, entropy_loss, ratio
+        loss = pg_loss - args.ent_coef * entropy_loss
+        return loss, pg_loss, entropy_loss, ratio
 
     def training_step(self, batch, args):
         obs = batch["observations"]
         masks = batch["masks"]
         actions = batch["actions"]
-        advantages = batch["advantages"]
         returns = batch["returns"]
-        values = batch.get("values", None)  # May not exist in older code
         oldlogprobs = batch["logprobs"]
 
-        # Normalize advantages (optional but common in PPO)
-        if hasattr(args, "norm_adv") and args.norm_adv:
-            advantages_mean, advantages_std = advantages.mean(), advantages.std()
-            advantages = (advantages - advantages_mean) / (advantages_std + 1e-8)
+        # Remember which indices have zero returns for later masking
+        zero_return_mask = (returns == 0.0).float()
+
+        # reward normalization
+        returns_mean = returns.mean()
+        returns_std = returns.std()
+        returns = (returns - returns_mean) / (returns_std + 1e-8)
 
         # Flag batch samples where the raw owned cells channel (index 10) sums to zero.
         # If a sample has no owned cells then its loss contributions will be zero.
@@ -303,19 +294,21 @@ class Network(L.LightningModule):
         # Zero out samples where player owns multiple generals
         valid_mask = valid_mask * (1 - num_owned_generals)
 
+        # Zero out samples where there is zero return
+        valid_mask = valid_mask * (1 - zero_return_mask)
+
         # Compute network outputs
-        _, newvalues, newlogprobs, entropy = self(obs, masks, actions)
+        _, newlogprobs, entropy = self(obs, masks, actions)
 
         # Zero out the loss components of invalid samples so they have no effect.
-        advantages = advantages * valid_mask
+        # Since pg_loss involves returns and entropy_loss is an average,
+        # setting returns and entropy to zero for these samples effectively cancels their loss.
         returns = returns * valid_mask
         entropy = entropy * valid_mask
 
-        loss, pg_loss, value_loss, entropy_loss, ratio = self.calculate_loss(
-            newlogprobs, oldlogprobs, entropy, advantages, returns, values, newvalues, args
-        )
+        loss, pg_loss, entropy_loss, ratio = self.calculate_loss(newlogprobs, oldlogprobs, entropy, returns, args)
 
-        return loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs
+        return loss, pg_loss, entropy_loss, ratio, newlogprobs
 
     @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
