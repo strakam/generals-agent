@@ -48,7 +48,7 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(24 * 24, 1),
-            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
+            Lambda(lambda x: 2*torch.tanh(x)),  # Scale up tanh
         )
 
         self.square_loss = nn.CrossEntropyLoss()
