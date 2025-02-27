@@ -13,7 +13,7 @@ from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
-from network import load_network, Network, load_fabric_checkpoint
+from network import Network, load_fabric_checkpoint
 
 torch.set_float32_matmul_precision("medium")
 
@@ -55,9 +55,9 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 800
-    n_steps: int = 500
-    batch_size: int = 400
+    n_envs: int = 700
+    n_steps: int = 600
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
@@ -67,7 +67,7 @@ class SelfPlayConfig:
     checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay/"
     # checkpoint_dir: str = "checkpoints/"
 
-    winrate_threshold: float = 0.55
+    winrate_threshold: float = 0.45
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -150,7 +150,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=ShapedRewardFn(),
+                reward_fn=WinLoseRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
@@ -424,7 +424,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _, _ = self.fixed_network(player2_obs, player2_mask)
+                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
