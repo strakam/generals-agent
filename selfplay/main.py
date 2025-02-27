@@ -34,22 +34,22 @@ class ShapedRewardFn(RewardFn):
         self.shaping_weight = shaping_weight
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
-        if opponent_army > 0:
-            ratio = my_army / opponent_army
-            ratio = np.log(ratio) / np.log(self.maximum_ratio)
-            return np.minimum(np.maximum(ratio, -1.0), 1.0)
-        return 0.0
+        ratio = my_army / opponent_army
+        ratio = np.log(ratio) / np.log(self.maximum_ratio)
+        return np.minimum(np.maximum(ratio, -1.0), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
 
-        prev_my_army = prior_obs.owned_army_count
-        prev_opponent_army = prior_obs.opponent_army_count
+        # If the game is done, we dont want to shape the reward
+        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
+            return original_reward
 
-        prev_ratio_reward = self.calculate_ratio_reward(prev_my_army, prev_opponent_army)
+        prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
 
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+
 
 @dataclass
 class SelfPlayConfig:
@@ -150,7 +150,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=ShapedRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
@@ -300,7 +300,9 @@ class SelfPlayTrainer:
                 # Index the data using tensor indexing
                 batch = {k: v[batch_indices_tensor] for k, v in data.items()}
 
-                loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(batch, self.cfg)
+                loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(
+                    batch, self.cfg
+                )
 
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
@@ -420,11 +422,11 @@ class SelfPlayTrainer:
                     self.actions[step] = player1_actions
                     self.values[step] = player1_value
                     self.logprobs[step] = player1_logprobs
-                    
+
                     # Get actions for player 2 (fixed player) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions, _ = self.fixed_network.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -464,11 +466,11 @@ class SelfPlayTrainer:
                 player1_next_mask = mask[:, 0]
                 _, next_value, _, _ = self.network(player1_next_obs, player1_next_mask)
                 next_value = next_value.reshape(1, -1)
-                
+
                 # Initialize advantages tensor
                 advantages = torch.zeros_like(self.rewards).to(self.fabric.device)
                 lastgaelam = 0
-                
+
                 # Calculate advantages using GAE
                 for t in reversed(range(self.cfg.n_steps)):
                     if t == self.cfg.n_steps - 1:
@@ -477,13 +479,15 @@ class SelfPlayTrainer:
                     else:
                         nextnonterminal = 1.0 - self.dones[t + 1].float()
                         nextvalues = self.values[t + 1]
-                    
+
                     # GAE formula: δ_t = r_t + γV(s_{t+1}) - V(s_t)
                     delta = self.rewards[t] + self.cfg.gamma * nextvalues * nextnonterminal - self.values[t]
-                    
+
                     # A_t = δ_t + γλA_{t+1}
-                    advantages[t] = lastgaelam = delta + self.cfg.gamma * self.cfg.gae_lambda * nextnonterminal * lastgaelam
-                
+                    advantages[t] = lastgaelam = (
+                        delta + self.cfg.gamma * self.cfg.gae_lambda * nextnonterminal * lastgaelam
+                    )
+
                 # Compute returns as advantage + value (for value function loss)
                 returns = advantages + self.values
 

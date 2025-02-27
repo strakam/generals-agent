@@ -48,7 +48,6 @@ class Network(L.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(24 * 24, 1),
-            Lambda(lambda x: 2*torch.tanh(x)),  # Scale up tanh
         )
 
         self.square_loss = nn.CrossEntropyLoss()
@@ -326,6 +325,8 @@ class Network(L.LightningModule):
         with torch.no_grad():
             representation = self.backbone(obs)
 
+        value = self.value_head(representation).flatten()
+
         # Get square logits and apply mask
         square_logits_unmasked = self.square_head(representation)
         square_logits = (square_logits_unmasked + square_mask).flatten(1)
@@ -349,7 +350,7 @@ class Network(L.LightningModule):
         action = torch.stack([zeros, i, j, direction, zeros], dim=1)
         action[action[:, 3] == 4, 0] = 1  # pass action
 
-        return action
+        return action, value
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr

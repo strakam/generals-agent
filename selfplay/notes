@@ -1,25 +1,4 @@
-Variance Reduction:
-- (return/advantage) normalization ?
-- one oracle value function that sees everything?
-- Add KL divergence to loss? -> need to calculate it correctly because of more complex action space
-- Reward shaping - is it dangerous or lez go?
-
-
-For selfplay
-- set good n_steps value (700 sounds nice)
-- make actions end-to-end without conditioning -> + increased confidence that PPO is correct, - much larger action space (is it?) - probably not a good idea
-- selfplay simultaneously or interleave ?
-- probably need for big compute -> focus a bit on smaller network? (reduction by 10M params seems to work)
-- it took a lot of time (?) to train against random policy
-
-
-- How to scale?
-- focus on more gpus and envs?
-- get working critic? smaller base network?
-- reward shaping?
-- something completely different? like temperature when sampling actions or e-greedy
-- data augmentation such as flips
-
-
-TODOs:
-- make tanh to be from [-2,2] for reward shaping
+- discuss reward shaping or curriculum??
+- critic sometimes very bad - should I do all-knowing critic?
+- argmax vs sampling
+- interleave or simultaneous or independent?
