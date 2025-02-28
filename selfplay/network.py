@@ -59,7 +59,6 @@ class Network(L.LightningModule):
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
             self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
-    @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):
         """
         Reset the network's internal state.
