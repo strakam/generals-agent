@@ -1,6 +1,5 @@
-- discuss reward shaping or curriculum??
+- discuss reward shaping or curriculum?? so far trying shaping
 - critic sometimes very bad - should I do all-knowing critic?
-- argmax vs sampling
-- interleave or simultaneous or independent?
+- argmax vs sampling -- not sure, but argmax seems to work better
+- interleave or simultaneous or independent? 
 - gumbel softmax
-- full finetune
