@@ -59,6 +59,7 @@ class Network(L.LightningModule):
             self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
             self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
+    @torch.compile(dynamic=False, fullgraph=True)
     def reset(self):
         """
         Reset the network's internal state.
@@ -212,8 +213,7 @@ class Network(L.LightningModule):
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
         # Use no_grad for backbone computation since it's frozen
-        with torch.no_grad():
-            representation = self.backbone(obs)
+        representation = self.backbone(obs)
 
         value = self.value_head(representation).flatten()
 
@@ -321,8 +321,7 @@ class Network(L.LightningModule):
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
         # Use no_grad for backbone computation since it's frozen
-        with torch.no_grad():
-            representation = self.backbone(obs)
+        representation = self.backbone(obs)
 
         value = self.value_head(representation).flatten()
 
