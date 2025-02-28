@@ -55,9 +55,9 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 700
-    n_steps: int = 600
-    batch_size: int = 600
+    n_envs: int = 128
+    n_steps: int = 3200
+    batch_size: int = 400
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
@@ -72,7 +72,7 @@ class SelfPlayConfig:
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 1.5e-5  # Standard PPO learning rate
+    learning_rate: float = 1.5e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
@@ -158,6 +158,45 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
     )
 
 
+def count_parameters(model, component_name=None):
+    """Count parameters in the model or a specific component."""
+    if component_name is not None:
+        component = getattr(model, component_name, None)
+        if component is None:
+            return 0
+        return sum(p.numel() for p in component.parameters() if p.requires_grad)
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def print_parameter_breakdown(model):
+    """Print detailed breakdown of model parameters by component."""
+    total_params = count_parameters(model)
+    backbone_params = count_parameters(model, "backbone")
+    square_head_params = count_parameters(model, "square_head")
+    direction_head_params = count_parameters(model, "direction_head")
+    value_head_params = count_parameters(model, "value_head")
+    
+    # Calculate percentage of total for each component
+    backbone_percent = backbone_params / total_params * 100 if total_params > 0 else 0
+    square_head_percent = square_head_params / total_params * 100 if total_params > 0 else 0
+    direction_head_percent = direction_head_params / total_params * 100 if total_params > 0 else 0
+    value_head_percent = value_head_params / total_params * 100 if total_params > 0 else 0
+    
+    print("\n" + "="*50)
+    print("MODEL PARAMETER BREAKDOWN")
+    print("="*50)
+    print(f"Total trainable parameters: {total_params:,}")
+    print(f"Backbone parameters: {backbone_params:,} ({backbone_percent:.2f}%)")
+    print(f"Square head parameters: {square_head_params:,} ({square_head_percent:.2f}%)")
+    print(f"Direction head parameters: {direction_head_params:,} ({direction_head_percent:.2f}%)")
+    print(f"Value head parameters: {value_head_params:,} ({value_head_percent:.2f}%)")
+    
+    # Also count non-trainable parameters
+    non_trainable_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    print(f"Non-trainable parameters: {non_trainable_params:,}")
+    print(f"Total parameters: {total_params + non_trainable_params:,}")
+    print("="*50 + "\n")
+
+
 class SelfPlayTrainer:
     """Encapsulates setup and training loop for self-play."""
 
@@ -190,8 +229,10 @@ class SelfPlayTrainer:
             self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
-            n_params = sum(p.numel() for p in self.network.parameters())
-            print(f"Number of parameters: {n_params:,}")
+        
+        # Print detailed parameter breakdown
+        if self.fabric.is_global_zero:
+            print_parameter_breakdown(self.network)
 
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
@@ -558,6 +599,17 @@ class SelfPlayTrainer:
 
 
 def main(args):
+    if args.count_params:
+        # Just create a network and print parameter counts without starting training
+        network = Network(
+            channel_sequence=[192, 224, 256, 256],
+            repeats=[2, 2, 1, 1],
+            batch_size=1
+        )
+        network.reset()
+        print_parameter_breakdown(network)
+        return
+        
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
@@ -614,5 +666,7 @@ def clean_checkpoint(checkpoint_path, output_path=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Self-Play Configuration")
+    parser.add_argument("--count-params", action="store_true", 
+                      help="Just count parameters and exit without training")
     args = parser.parse_args()
     main(args)
