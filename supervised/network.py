@@ -21,14 +21,14 @@ class Network(L.LightningModule):
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
-        self.value_head = nn.Sequential(
-            Pyramid(final_channels, [], []),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(h * w, 1),
-            Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
-        )
+        # self.value_head = nn.Sequential(
+        #     Pyramid(final_channels, [], []),
+        #     nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+        #     nn.ReLU(),
+        #     nn.Flatten(),
+        #     nn.Linear(h * w, 1),
+        #     Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
+        # )
 
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
@@ -42,12 +42,12 @@ class Network(L.LightningModule):
 
         self.square_loss = nn.CrossEntropyLoss()
         weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 20])
-        self.direction_loss = nn.CrossEntropyLoss(weight=weights)
+        # self.direction_loss = nn.CrossEntropyLoss(weight=weights)
         self.value_loss = nn.MSELoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone)
-            self.value_head = torch.compile(self.value_head)
+            # self.value_head = torch.compile(self.value_head)
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
@@ -83,7 +83,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        value = self.value_head(x)
+        # value = self.value_head(x)
 
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)

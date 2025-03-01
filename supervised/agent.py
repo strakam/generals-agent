@@ -7,7 +7,7 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from supervised.network import Network
+from selfplay.network import Network
 
 GRID_SIZE = 24
 DEFAULT_HISTORY_SIZE = 5
@@ -22,7 +22,7 @@ def conditional_compile(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if isinstance(self, (NeuroAgent, OnlineAgent, SelfPlayAgent)) and not isinstance(self, SupervisedAgent):
+        if isinstance(self, (NeuroAgent, OnlineAgent)) and not isinstance(self, SupervisedAgent):
             return torch.compile(func)(self, *args, **kwargs)
         return func(self, *args, **kwargs)
 
@@ -106,6 +106,7 @@ class NeuroAgent(Agent):
             "cities",
             "generals",
             "mountains",
+            "last_observation",
         ]
 
         for attr in attributes_to_reset:
@@ -209,49 +210,11 @@ class NeuroAgent(Agent):
         mask = torch.from_numpy(mask).float().to(self.device)
 
         with torch.no_grad():
-            square, direction = self.network(self.last_observation, mask)
+            # action, logprob, entropy = self.network(self.last_observation, mask)
+            action, value = self.network.predict(self.last_observation, mask)
 
-        square = torch.argmax(square, dim=1)
-        direction = torch.argmax(direction, dim=1)
-        row = square // GRID_SIZE
-        col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size).to(self.device)
-        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
-        # actions, where direction is 4, set the first value to 1
-        actions[actions[:, 3] == 4, 0] = 1
-        return actions.cpu().numpy().astype(int)
-
-
-class SelfPlayAgent(NeuroAgent):
-    def __init__(
-        self,
-        network: L.LightningModule | None = None,
-        id: str = "Neuro",
-        history_size: int | None = DEFAULT_HISTORY_SIZE,
-        batch_size: int = DEFAULT_BATCH_SIZE,
-        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    ):
-        super().__init__(network, id, history_size, batch_size, device)
-
-    @conditional_compile
-    def act(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            square_logits, direction_logits = self.network(obs, mask)
-
-        square = torch.argmax(square_logits, dim=1)
-        direction = torch.argmax(direction_logits, dim=1)
-        row = square // GRID_SIZE
-        col = square % GRID_SIZE
-        zeros = torch.zeros(self.batch_size).to(self.device)
-        actions = torch.stack([zeros, row, col, direction, zeros], dim=1)
-        actions[actions[:, 3] == 4, 0] = 1
-
-        # Get log probabilities of selected actions
-        square_logprob = torch.log_softmax(square_logits, dim=1)[torch.arange(square.shape[0]), square]
-        direction_logprob = torch.log_softmax(direction_logits, dim=1)[torch.arange(direction.shape[0]), direction]
-        logprob = square_logprob + direction_logprob
-
-        return actions, logprob
+        # Sample from distributions instead of using argmax
+        return action.cpu().numpy().astype(int), value.cpu().numpy().astype(float)
 
 
 class SupervisedAgent(NeuroAgent):
@@ -287,8 +250,9 @@ class OnlineAgent(NeuroAgent):
         obs.pad_observation(24)
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
-        action = super().act(obs, mask)[0]
-        return action
+        action, value = super().act(obs, mask)
+        # print(f"Value: {value}")
+        return action[0]
 
     def precompile(self):
         """
@@ -351,5 +315,55 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
         agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
     else:  # "base" or default case
         agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
+
+    return agent
+
+def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", eval_mode: bool = True) -> NeuroAgent:
+    """Load a trained agent from a Fabric checkpoint file.
+
+    Args:
+        path: Path to the Fabric checkpoint file
+        batch_size: Batch size for the agent
+        mode: Type of agent to create ("online", "supervised", or "base")
+        eval_mode: Whether to put the model in evaluation mode
+
+    Returns:
+        NeuroAgent: Loaded agent ready for inference
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = torch.load(path, map_location=device)
+    
+    # Create a new network
+    network = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
+    
+    # Extract the state dict from the checkpoint
+    if isinstance(checkpoint, dict):
+        if "model" in checkpoint:
+            state_dict = checkpoint["model"]
+            if hasattr(state_dict, "state_dict"):
+                state_dict = state_dict.state_dict()
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            raise ValueError(f"Unexpected checkpoint format. Keys found: {checkpoint.keys()}")
+    else:
+        state_dict = checkpoint
+
+    # Filter and load the state dict
+    network_keys = network.state_dict().keys()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in network_keys and k != "direction_loss.weight"}
+    network.load_state_dict(filtered_state_dict)
+
+    if eval_mode:
+        network.eval()
+    
+    agent_id = path.split("/")[-1].split(".")[0]
+
+    if mode == "online":
+        agent = OnlineAgent(network, id=agent_id, device=device)
+    elif mode == "supervised":
+        agent = SupervisedAgent(network, id=agent_id, batch_size=batch_size, device=device)
+    else:  # "base" or default case
+        agent = NeuroAgent(network, id=agent_id, batch_size=batch_size, device=device)
 
     return agent
