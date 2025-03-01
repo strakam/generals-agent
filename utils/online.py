@@ -2,7 +2,7 @@ import time
 import numpy as np
 import argparse
 from generals.remote import GeneralsIOClient
-from supervised.agent import OnlineAgent, load_agent
+from supervised.agent import OnlineAgent, load_fabric_checkpoint
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -22,7 +22,7 @@ def join_game_loop(client, agent, lobby_id):
                 client.join_private_lobby(lobby_id)
             else:
                 client.join_1v1_queue()
-                timeout = np.random.randint(10, 20)
+                timeout = np.random.randint(10, 23)
                 print(f"Sleeping for {timeout} seconds...")
                 time.sleep(timeout)
 
@@ -31,7 +31,7 @@ def join_game_loop(client, agent, lobby_id):
 
 def load_online_agent(checkpoint_path: str) -> OnlineAgent:
     """Load an agent for online play"""
-    agent = load_agent(
+    agent = load_fabric_checkpoint(
         checkpoint_path,
         batch_size=1,  # Online play is always single instance
         eval_mode=True,
@@ -43,7 +43,9 @@ def load_online_agent(checkpoint_path: str) -> OnlineAgent:
 def main():
     args = parse_arguments()
 
-    checkpoint_path = "checkpoints/sup114/step=52000.ckpt"
+    # checkpoint_path = "checkpoints/sup114/step=52000.ckpt"
+    checkpoint_path = "checkpoints/selfplay/snowballer.ckpt"
+    # checkpoint_path = "checkpoints/sup335/step=50000.ckpt"
     agent = load_online_agent(checkpoint_path)
 
     with GeneralsIOClient(agent, args.user_id, args.public) as client:
