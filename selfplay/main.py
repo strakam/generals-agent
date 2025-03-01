@@ -39,9 +39,7 @@ class ShapedRewardFn(RewardFn):
         return np.minimum(np.maximum(ratio, -1.0), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        general_change = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        city_change = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
-        original_reward = general_change + 0.15 * city_change
+        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
         # If the game is done, we dont want to shape the reward
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
             return original_reward
@@ -56,24 +54,24 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 2
-    n_steps: int = 32
-    batch_size: int = 4
+    n_envs: int = 600
+    n_steps: int = 700
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "supervised.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/explicit/"
+    checkpoint_path: str = "snowballer.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay/"
     # checkpoint_dir: str = "checkpoints/"
 
-    winrate_threshold: float = 0.40
+    winrate_threshold: float = 0.42
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 3e-6  # Standard PPO learning rate
+    learning_rate: float = 2e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
