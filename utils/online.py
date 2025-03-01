@@ -23,7 +23,7 @@ def join_game_loop(client, agent, lobby_id):
             else:
                 client.join_1v1_queue()
                 timeout = np.random.randint(10, 23)
-                print(f"Sleeping for {timeout} seconds...", end=" ", flush=True)
+                print(f" ...Sleeping for {timeout} seconds...", end=" ", flush=True)
                 time.sleep(timeout)
 
         elif client.status == "lobby":
