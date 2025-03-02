@@ -17,20 +17,20 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
-    buffer_size: int = 18
-    batch_size: int = 92
-    n_workers: int = 4
+    buffer_size: int = 18000
+    batch_size: int = 1732
+    n_workers: int = 44
     # Training parameters
     learning_rate: float = 2e-4
     n_epochs: int = 16
     clip_val: float = 2.0
     seed: int = 42
-    channel_sequence: list[int] = field(default_factory=lambda: [192, 224, 256, 256])
-    repeats: list[int] = field(default_factory=lambda: [2, 2, 1, 1])
+    channel_sequence: list[int] = field(default_factory=lambda: [256, 256, 288, 288])
+    repeats: list[int] = field(default_factory=lambda: [2, 2, 2, 1])
 
     # Logging and checkpointing
     log_every_n_steps: int = 20
-    checkpoint_every_n_steps: int = 5000
+    checkpoint_every_n_steps: int = 4000
     checkpoint_dir: str = "/storage/praha1/home/strakam3/sup_checkpoints/"
     neptune_token_path: str = "neptune_token.txt"
     model_ckpt: str = None

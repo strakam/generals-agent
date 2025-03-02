@@ -14,21 +14,20 @@ class Network(L.LightningModule):
         compile: bool = False,
     ):
         super().__init__()
-        c, h, w = 31, 24, 24
+        c, h, w = 37, 24, 24
         self.lr = lr
         self.n_steps = n_steps
 
         self.backbone = Pyramid(c, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
-        # self.value_head = nn.Sequential(
-        #     Pyramid(final_channels, [], []),
-        #     nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-        #     nn.ReLU(),
-        #     nn.Flatten(),
-        #     nn.Linear(h * w, 1),
-        #     Lambda(lambda x: torch.tanh(x)),  # Scale up tanh
-        # )
+        self.value_head = nn.Sequential(
+            Pyramid(final_channels, [], []),
+            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(h * w, 1),
+        )
 
         self.square_head = nn.Sequential(
             Pyramid(final_channels, [1], [final_channels]),
@@ -41,21 +40,20 @@ class Network(L.LightningModule):
         )
 
         self.square_loss = nn.CrossEntropyLoss()
-        weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1 / 20])
-        # self.direction_loss = nn.CrossEntropyLoss(weight=weights)
+        self.direction_loss = nn.CrossEntropyLoss()
         self.value_loss = nn.MSELoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone)
-            # self.value_head = torch.compile(self.value_head)
+            self.value_head = torch.compile(self.value_head)
             self.square_head = torch.compile(self.square_head)
             self.direction_head = torch.compile(self.direction_head)
 
     @torch.compile
     def normalize_observations(self, obs):
-        timestep_normalize = 500
-        army_normalize = 500
-        land_normalize = 200
+        timestep_normalize = 300
+        army_normalize = 250
+        land_normalize = 100
 
         obs[:, :4, :, :] = obs[:, :4, :, :] / army_normalize
         obs[:, 14, :, :] = obs[:, 14, :, :] / timestep_normalize
@@ -64,7 +62,7 @@ class Network(L.LightningModule):
         obs[:, 20, :, :] = obs[:, 20, :, :] / army_normalize
         obs[:, 17, :, :] = obs[:, 17, :, :] / land_normalize
         obs[:, 19, :, :] = obs[:, 19, :, :] / land_normalize
-        obs[:, 21:, :, :] = obs[:, 21:, :, :] / army_normalize
+        obs[:, 22:, :, :] = obs[:, 22:, :, :] / army_normalize
         return obs
 
     @torch.compile
@@ -83,7 +81,7 @@ class Network(L.LightningModule):
     def forward(self, obs, mask, teacher_cells=None):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
-        # value = self.value_head(x)
+        value = self.value_head(x)
 
         square_mask, direction_mask = self.prepare_masks(obs, mask)
         square_logits = self.square_head(x)
@@ -100,7 +98,7 @@ class Network(L.LightningModule):
 
         i, j = square // 24, square % 24
         direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return square_logits, direction
+        return square_logits, direction, value
 
     def training_step(self, batch, batch_idx):
         obs, mask, values, actions = batch
@@ -166,7 +164,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 192 if stage_channels == [] else stage_channels[0]
+        first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),

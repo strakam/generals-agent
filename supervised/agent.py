@@ -7,10 +7,10 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from selfplay.network import Network
+from supervised.network import Network
 
 GRID_SIZE = 24
-DEFAULT_HISTORY_SIZE = 5
+DEFAULT_HISTORY_SIZE = 7
 DEFAULT_BATCH_SIZE = 1
 
 
@@ -63,7 +63,7 @@ class NeuroAgent(Agent):
         self.network = network
         self.history_size = history_size
         self.batch_size = batch_size
-        self.n_channels = 21 + 2 * self.history_size
+        self.n_channels = 23 + 2 * self.history_size
         self.device = device
 
         if self.network is not None:
@@ -90,6 +90,8 @@ class NeuroAgent(Agent):
         self.mountains = torch.zeros(shape, device=device).bool()
         self.seen = torch.zeros(shape, device=device).bool()
         self.enemy_seen = torch.zeros(shape, device=device).bool()
+        self.last_enemy_army_seen_value = torch.zeros(shape, device=device)
+        self.last_enemy_army_seen_timestep = torch.zeros(shape, device=device)
         self.last_observation = torch.zeros((self.batch_size, self.n_channels, 24, 24), device=device)
 
     def reset_histories(self, obs: torch.Tensor):
@@ -106,6 +108,8 @@ class NeuroAgent(Agent):
             "cities",
             "generals",
             "mountains",
+            "last_enemy_army_seen_value",
+            "last_enemy_army_seen_timestep",
             "last_observation",
         ]
 
@@ -161,6 +165,13 @@ class NeuroAgent(Agent):
             max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool(),
         )
 
+        enemy_armies = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]
+        # Update enemy_armies_seen where current enemy armies are non-zero
+        self.last_enemy_army_seen_value = torch.where(enemy_armies > 0, enemy_armies, self.last_enemy_army_seen_value)
+        self.last_enemy_army_seen_value += 0.01
+        self.last_enemy_army_seen_timestep = torch.where(enemy_armies > 0, 0, self.last_enemy_army_seen_timestep)
+
+        self.cities |= obs[:, cities, :, :].bool()
         self.cities |= obs[:, cities, :, :].bool()
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
@@ -189,6 +200,8 @@ class NeuroAgent(Agent):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
+                self.last_enemy_army_seen_timestep,
+                self.last_enemy_army_seen_value,
             ],
             dim=1,
         )
@@ -318,6 +331,7 @@ def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
 
     return agent
 
+
 def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", eval_mode: bool = True) -> NeuroAgent:
     """Load a trained agent from a Fabric checkpoint file.
 
@@ -332,10 +346,10 @@ def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", e
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(path, map_location=device)
-    
+
     # Create a new network
     network = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
-    
+
     # Extract the state dict from the checkpoint
     if isinstance(checkpoint, dict):
         if "model" in checkpoint:
@@ -356,7 +370,7 @@ def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", e
 
     if eval_mode:
         network.eval()
-    
+
     agent_id = path.split("/")[-1].split(".")[0]
 
     if mode == "online":
