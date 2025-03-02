@@ -9,7 +9,7 @@ torch._dynamo.config.capture_scalar_outputs = True
 
 class Network(L.LightningModule):
     GRID_SIZE = 24
-    DEFAULT_HISTORY_SIZE = 5
+    DEFAULT_HISTORY_SIZE = 7
     DEFAULT_BATCH_SIZE = 1
 
     def __init__(
@@ -27,7 +27,7 @@ class Network(L.LightningModule):
         self.n_steps = n_steps
         self.history_size = history_size
         self.batch_size = batch_size
-        self.n_channels = 21 + 2 * self.history_size
+        self.n_channels = 23 + 2 * self.history_size
 
         self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -78,9 +78,8 @@ class Network(L.LightningModule):
         self.register_buffer("mountains", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("seen", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("enemy_seen", torch.zeros(shape, dtype=torch.bool, device=device))
-
-        if device.type == "cuda":
-            torch.cuda.synchronize()  # Ensure buffers are fully initialized on GPU
+        self.register_buffer("last_enemy_army_seen_value", torch.zeros(shape, device=device))
+        self.register_buffer("last_enemy_army_seen_timestep", torch.zeros(shape, device=device))
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -91,6 +90,8 @@ class Network(L.LightningModule):
             "enemy_stack",
             "last_army",
             "last_enemy_army",
+            "last_enemy_army_seen_value",
+            "last_enemy_army_seen_timestep",
             "seen",
             "enemy_seen",
             "cities",
@@ -147,6 +148,12 @@ class Network(L.LightningModule):
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
 
+        self.last_enemy_army_seen_value = torch.where(
+            current_enemy_army > 0, current_enemy_army, self.last_enemy_army_seen_value
+        )
+        self.last_enemy_army_seen_value += 0.01
+        self.last_enemy_army_seen_timestep = torch.where(current_enemy_army > 0, 0, self.last_enemy_army_seen_timestep)
+
         ones = torch.ones((self.batch_size, 24, 24), device=self.device)
         channels = torch.stack(
             [
@@ -171,6 +178,8 @@ class Network(L.LightningModule):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
+                self.last_enemy_army_seen_timestep,
+                self.last_enemy_army_seen_value,
             ],
             dim=1,
         )
@@ -180,13 +189,13 @@ class Network(L.LightningModule):
 
     @torch.compile(dynamic=False, fullgraph=True)
     def normalize_observations(self, obs):
-        timestep_normalize = 500
-        army_normalize = 500
-        land_normalize = 200
+        timestep_normalize = 300
+        army_normalize = 250
+        land_normalize = 100
 
         # Combine all army-related normalizations into one operation
         # This includes: first 4 channels, army counts (18, 20), and history stacks (21+)
-        obs[:, [0, 1, 2, 3, 18, 20] + list(range(21, obs.shape[1])), :, :] /= army_normalize
+        obs[:, [0, 1, 2, 3, 18, 20] + list(range(22, obs.shape[1])), :, :] /= army_normalize
 
         # Timestep normalization
         obs[:, 14, :, :] /= timestep_normalize
@@ -398,7 +407,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 192 if stage_channels == [] else stage_channels[0]
+        first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -562,7 +571,7 @@ def load_fabric_checkpoint(path: str, batch_size: int, eval_mode: bool = True) -
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(path, map_location=device)
 
-    model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True, batch_size=batch_size)
+    model = Network(channel_sequence=[256, 256, 288, 288], repeats=[2, 2, 2, 1], compile=True, batch_size=batch_size)
 
     # The checkpoint["model"] is already a state dict, no need to call .state_dict()
     state_dict = checkpoint["model"]

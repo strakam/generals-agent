@@ -32,13 +32,13 @@ class ShapedRewardFn(RewardFn):
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
 
 
-# agent1 = load_fabric_checkpoint("checkpoints/selfplay/cp_3.ckpt", mode="online")
+# agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
 # agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
-agent1 = load_fabric_checkpoint("checkpoints/selfplay/step=4000.ckpt", mode="online")
-agent2 = load_fabric_checkpoint("checkpoints/selfplay/step=4000.ckpt", mode="online")
+agent1 = load_fabric_checkpoint("checkpoints/selfplay/step=24000.ckpt", mode="online")
+agent2 = load_fabric_checkpoint("checkpoints/selfplay/step=24000.ckpt", mode="online")
 # agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
 
-agent_names = ["cp_3", "snowballer"]
+agent_names = ["anti", "snowballer"]
 agents = {agent_names[0]: agent1, agent_names[1]: agent2}
 
 # Create environment

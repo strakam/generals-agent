@@ -1,5 +1,12 @@
-- discuss reward shaping or curriculum?? so far trying shaping
+- shaping vs currciulum - not well explored by me
 - critic sometimes very bad - should I do all-knowing critic?
 - argmax vs sampling -- not sure, but argmax seems to work better
 - interleave or simultaneous or independent? 
 - gumbel softmax
+
+
+Next steps:
+1. Larger model + new features, now on larger maps too.
+2. Split actions + gumbel softmax
+3/4. RNN vs game theory approach (read FSP,..)
+5. Hyperparams and larger scale training

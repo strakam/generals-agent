@@ -7,7 +7,6 @@ import argparse
 import neptune
 from lightning.fabric import Fabric
 from tqdm import tqdm
-import os
 
 from generals import GridFactory, GymnasiumGenerals
 from generals.core.rewards import RewardFn, compute_num_generals_owned
@@ -15,9 +14,8 @@ from generals.core.observation import Observation
 from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
 from model_utils import (
-    save_checkpoint, 
     check_and_save_checkpoints,
-    print_parameter_breakdown
+    print_parameter_breakdown,
 )
 
 torch.set_float32_matmul_precision("medium")
@@ -33,7 +31,7 @@ class ShapedRewardFn(RewardFn):
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
         ratio = my_army / opponent_army
         ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -0.25), 1.0)
+        return np.minimum(np.maximum(ratio, -0.5), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
@@ -51,18 +49,18 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 600
+    n_envs: int = 500
     n_steps: int = 700
-    batch_size: int = 600
+    batch_size: int = 500
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
-    channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
-    repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "snowballer.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/baller2/"
+    channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
+    repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
+    checkpoint_path: str = "step=24000.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/larger/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47, 0.48, 0.50])
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.475, 0.50])
     update_fixed_network_threshold: float = 0.50
 
     # PPO parameters
@@ -71,7 +69,7 @@ class SelfPlayConfig:
     learning_rate: float = 6e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
