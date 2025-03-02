@@ -7,7 +7,7 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from supervised.network import Network
+from selfplay.network import Network
 
 GRID_SIZE = 24
 DEFAULT_HISTORY_SIZE = 7

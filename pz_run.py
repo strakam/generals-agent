@@ -1,11 +1,9 @@
-from supervised.agent import load_agent, load_fabric_checkpoint
+from supervised.agent import load_fabric_checkpoint
 from generals import PettingZooGenerals, GridFactory
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 import numpy as np
-
-n_envs = 1
 
 class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""

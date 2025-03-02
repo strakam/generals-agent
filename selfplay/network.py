@@ -9,7 +9,7 @@ torch._dynamo.config.capture_scalar_outputs = True
 
 class Network(L.LightningModule):
     GRID_SIZE = 24
-    DEFAULT_HISTORY_SIZE = 5
+    DEFAULT_HISTORY_SIZE = 7
     DEFAULT_BATCH_SIZE = 1
 
     def __init__(
@@ -27,7 +27,7 @@ class Network(L.LightningModule):
         self.n_steps = n_steps
         self.history_size = history_size
         self.batch_size = batch_size
-        self.n_channels = 21 + 2 * self.history_size
+        self.n_channels = 23 + 2 * self.history_size
 
         self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
         final_channels = channel_sequence[0]
@@ -78,6 +78,8 @@ class Network(L.LightningModule):
         self.register_buffer("mountains", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("seen", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("enemy_seen", torch.zeros(shape, dtype=torch.bool, device=device))
+        self.register_buffer("last_enemy_army_seen_value", torch.zeros(shape, device=device))
+        self.register_buffer("last_enemy_army_seen_timestep", torch.zeros(shape, device=device))
 
         if device.type == "cuda":
             torch.cuda.synchronize()  # Ensure buffers are fully initialized on GPU
@@ -96,6 +98,8 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
+            "last_enemy_army_seen_value",
+            "last_enemy_army_seen_timestep",
         ]
 
         for attr in attributes_to_reset:
@@ -143,6 +147,12 @@ class Network(L.LightningModule):
         self.seen |= max_pool2d(obs[:, owned_cells, :, :], 3, 1, 1).bool()
         self.enemy_seen |= max_pool2d(obs[:, opponent_cells, :, :], 3, 1, 1).bool()
 
+        self.last_enemy_army_seen_value = torch.where(
+            current_enemy_army > 0, current_enemy_army, self.last_enemy_army_seen_value
+        )
+        self.last_enemy_army_seen_value += 0.01
+        self.last_enemy_army_seen_timestep = torch.where(current_enemy_army > 0, 0, self.last_enemy_army_seen_timestep)
+
         self.cities |= obs[:, cities, :, :].bool()
         self.generals |= obs[:, generals, :, :].bool()
         self.mountains |= obs[:, mountains, :, :].bool()
@@ -171,6 +181,8 @@ class Network(L.LightningModule):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
+                self.last_enemy_army_seen_timestep,
+                self.last_enemy_army_seen_value,
             ],
             dim=1,
         )
@@ -180,13 +192,13 @@ class Network(L.LightningModule):
 
     @torch.compile(dynamic=False, fullgraph=True)
     def normalize_observations(self, obs):
-        timestep_normalize = 500
-        army_normalize = 500
-        land_normalize = 200
+        timestep_normalize = 300
+        army_normalize = 250
+        land_normalize = 100
 
         # Combine all army-related normalizations into one operation
         # This includes: first 4 channels, army counts (18, 20), and history stacks (21+)
-        obs[:, [0, 1, 2, 3, 18, 20] + list(range(21, obs.shape[1])), :, :] /= army_normalize
+        obs[:, [0, 1, 2, 3, 18, 20] + list(range(22, obs.shape[1])), :, :] /= army_normalize
 
         # Timestep normalization
         obs[:, 14, :, :] /= timestep_normalize
@@ -398,7 +410,7 @@ class Pyramid(nn.Module):
     ):
         super().__init__()
         # First convolution to adjust input channels
-        first_channels = 192 if stage_channels == [] else stage_channels[0]
+        first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_channels, first_channels, kernel_size=3, padding=1),
             nn.ReLU(),
