@@ -10,7 +10,7 @@ from tqdm import tqdm
 import os
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import RewardFn, compute_num_generals_owned, compute_num_cities_owned
+from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
@@ -29,14 +29,14 @@ class WinLoseRewardFn(RewardFn):
 class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
 
-    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
+    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.75):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
         ratio = my_army / opponent_army
         ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -1.0), 1.0)
+        return np.minimum(np.maximum(ratio, -0.25), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
@@ -56,25 +56,25 @@ class SelfPlayConfig:
     training_iterations: int = 1000
     n_envs: int = 600
     n_steps: int = 700
-    batch_size: int = 600
+    batch_size: int = 700
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "snowballer.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/selfplay/"
-    # checkpoint_dir: str = "checkpoints/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/baller/"
 
-    winrate_threshold: float = 0.42
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47, 0.48, 0.50])
+    update_fixed_network_threshold: float = 0.50
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 2e-6  # Standard PPO learning rate
+    learning_rate: float = 4e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
@@ -244,6 +244,8 @@ class SelfPlayTrainer:
         self.agent_names = ["1", "2"]
         self.envs = create_environment(self.agent_names, cfg)
 
+        self.saved_thresholds = set()
+
         # Setup expected tensor shapes for rollouts.
         self.n_agents = 2
         self.n_channels = self.network.n_channels
@@ -274,10 +276,10 @@ class SelfPlayTrainer:
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
 
-    def save_checkpoint(self, iteration: int):
+    def save_checkpoint(self, iteration: int, win_rate_threshold: float):
         """Save a checkpoint in Fabric format for the current self-play iteration."""
         if self.fabric.is_global_zero:  # Only save on main process
-            checkpoint_name = f"cp_{iteration}.ckpt"
+            checkpoint_name = f"cp_{iteration}_threshold_{int(win_rate_threshold*100)}.ckpt"
             checkpoint_path = f"{self.cfg.checkpoint_dir}/{checkpoint_name}"
 
             # Create checkpoint directory if it doesn't exist
@@ -295,7 +297,7 @@ class SelfPlayTrainer:
 
     def check_and_save_checkpoints(self, win_rate: float):
         """Check if we've crossed any win rate thresholds and save checkpoints if needed."""
-        for threshold in self.cfg.win_rate_thresholds:
+        for threshold in self.cfg.store_checkpoint_thresholds:
             if win_rate >= threshold and threshold not in self.saved_thresholds:
                 # Save both types of checkpoints
                 self.save_checkpoint(win_rate, threshold)
@@ -540,17 +542,15 @@ class SelfPlayTrainer:
                 avg_game_length = avg_game_length / total_games  # Calculate average game length
 
                 # # Check if we should save a checkpoint
-                # self.check_and_save_checkpoints(win_rate)
+                self.check_and_save_checkpoints(win_rate)
 
                 # If win rate exceeds threshold, update fixed network to current network
-                if win_rate >= self.cfg.winrate_threshold:
+                if win_rate >= self.cfg.update_fixed_network_threshold:
                     self.fabric.print(
-                        f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.winrate_threshold:.2%}, updating fixed network"
+                        f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.update_fixed_network_threshold:.2%}, updating fixed network"
                     )
                     self.fixed_network.load_state_dict(self.network.state_dict())
                     self.self_play_iteration += 1
-
-                    self.save_checkpoint(self.self_play_iteration)
 
             else:
                 win_rate = draw_rate = loss_rate = avg_game_length = 0.0
