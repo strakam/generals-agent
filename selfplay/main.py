@@ -60,7 +60,7 @@ class SelfPlayConfig:
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
     checkpoint_path: str = "snowballer.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/baller/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/baller2/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47, 0.48, 0.50])
     update_fixed_network_threshold: float = 0.50
@@ -68,7 +68,7 @@ class SelfPlayConfig:
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 4e-6  # Standard PPO learning rate
+    learning_rate: float = 6e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
