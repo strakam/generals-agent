@@ -119,6 +119,31 @@ class Network(L.LightningModule):
         self.log("loss", loss, on_step=True, prog_bar=True)
         return loss
 
+    def predict(self, obs, mask):
+        obs = self.normalize_observations(obs)
+        x = self.backbone(obs)
+        value = self.value_head(x)
+
+        square_mask, direction_mask = self.prepare_masks(obs, mask)
+        square_logits = self.square_head(x)
+        square_logits = (square_logits + square_mask).flatten(1)
+        square = torch.argmax(square_logits, dim=1).int()
+        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
+        representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        direction = self.direction_head(representation_with_square)
+        direction = direction + direction_mask
+        i, j = square // 24, square % 24
+        direction = direction[torch.arange(direction.shape[0]), :, i, j]
+
+        direction = direction.argmax(dim=1)
+
+        # Create action tensor with shape [batch_size, 5]
+        zeros = torch.zeros_like(square, dtype=torch.float)
+        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
+        action[action[:, 3] == 4, 0] = 1  # pass action
+
+        return action, value
+
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, amsgrad=True)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.n_steps, eta_min=1e-5)

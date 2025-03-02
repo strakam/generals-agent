@@ -348,7 +348,7 @@ def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", e
     checkpoint = torch.load(path, map_location=device)
 
     # Create a new network
-    network = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
+    network = Network(channel_sequence=[256, 256, 288, 288], repeats=[2, 2, 2, 1], compile=True)
 
     # Extract the state dict from the checkpoint
     if isinstance(checkpoint, dict):

@@ -22,7 +22,7 @@ def join_game_loop(client, agent, lobby_id):
                 client.join_private_lobby(lobby_id)
             else:
                 client.join_1v1_queue()
-                timeout = np.random.randint(10, 23)
+                timeout = np.random.randint(120, 150)
                 print(f" ...Sleeping for {timeout} seconds...", end=" ", flush=True)
                 time.sleep(timeout)
 
