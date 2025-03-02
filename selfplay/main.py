@@ -14,16 +14,13 @@ from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
+from model_utils import (
+    save_checkpoint, 
+    check_and_save_checkpoints,
+    print_parameter_breakdown
+)
 
 torch.set_float32_matmul_precision("medium")
-
-
-class WinLoseRewardFn(RewardFn):
-    """A simple reward function. +1 if the agent wins. -1 if they lose."""
-
-    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        change_in_num_generals_owned = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        return float(1 * change_in_num_generals_owned)
 
 
 class ShapedRewardFn(RewardFn):
@@ -56,7 +53,7 @@ class SelfPlayConfig:
     training_iterations: int = 1000
     n_envs: int = 600
     n_steps: int = 700
-    batch_size: int = 700
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
@@ -157,45 +154,6 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
     )
 
 
-def count_parameters(model, component_name=None):
-    """Count parameters in the model or a specific component."""
-    if component_name is not None:
-        component = getattr(model, component_name, None)
-        if component is None:
-            return 0
-        return sum(p.numel() for p in component.parameters() if p.requires_grad)
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-def print_parameter_breakdown(model):
-    """Print detailed breakdown of model parameters by component."""
-    total_params = count_parameters(model)
-    backbone_params = count_parameters(model, "backbone")
-    square_head_params = count_parameters(model, "square_head")
-    direction_head_params = count_parameters(model, "direction_head")
-    value_head_params = count_parameters(model, "value_head")
-    
-    # Calculate percentage of total for each component
-    backbone_percent = backbone_params / total_params * 100 if total_params > 0 else 0
-    square_head_percent = square_head_params / total_params * 100 if total_params > 0 else 0
-    direction_head_percent = direction_head_params / total_params * 100 if total_params > 0 else 0
-    value_head_percent = value_head_params / total_params * 100 if total_params > 0 else 0
-    
-    print("\n" + "="*50)
-    print("MODEL PARAMETER BREAKDOWN")
-    print("="*50)
-    print(f"Total trainable parameters: {total_params:,}")
-    print(f"Backbone parameters: {backbone_params:,} ({backbone_percent:.2f}%)")
-    print(f"Square head parameters: {square_head_params:,} ({square_head_percent:.2f}%)")
-    print(f"Direction head parameters: {direction_head_params:,} ({direction_head_percent:.2f}%)")
-    print(f"Value head parameters: {value_head_params:,} ({value_head_percent:.2f}%)")
-    
-    # Also count non-trainable parameters
-    non_trainable_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f"Non-trainable parameters: {non_trainable_params:,}")
-    print(f"Total parameters: {total_params + non_trainable_params:,}")
-    print("="*50 + "\n")
-
-
 class SelfPlayTrainer:
     """Encapsulates setup and training loop for self-play."""
 
@@ -275,33 +233,6 @@ class SelfPlayTrainer:
             self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32, device=device)
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
-
-    def save_checkpoint(self, iteration: int, win_rate_threshold: float):
-        """Save a checkpoint in Fabric format for the current self-play iteration."""
-        if self.fabric.is_global_zero:  # Only save on main process
-            checkpoint_name = f"cp_{iteration}_threshold_{int(win_rate_threshold*100)}.ckpt"
-            checkpoint_path = f"{self.cfg.checkpoint_dir}/{checkpoint_name}"
-
-            # Create checkpoint directory if it doesn't exist
-            os.makedirs(self.cfg.checkpoint_dir, exist_ok=True)
-
-            # Create state dictionary with everything needed to resume training
-            state = {
-                "model": self.network,
-                "optimizer": self.optimizer,
-            }
-
-            # Let Fabric handle the saving
-            self.fabric.save(checkpoint_path, state)
-            print(f"Saved Fabric checkpoint for self-play iteration {iteration} to {checkpoint_path}")
-
-    def check_and_save_checkpoints(self, win_rate: float):
-        """Check if we've crossed any win rate thresholds and save checkpoints if needed."""
-        for threshold in self.cfg.store_checkpoint_thresholds:
-            if win_rate >= threshold and threshold not in self.saved_thresholds:
-                # Save both types of checkpoints
-                self.save_checkpoint(win_rate, threshold)
-                self.saved_thresholds.add(threshold)
 
     def train(self, fabric: Fabric, data: dict):
         """Train the network using PPO on collected rollout data."""
@@ -541,8 +472,18 @@ class SelfPlayTrainer:
                 loss_rate = losses / total_games
                 avg_game_length = avg_game_length / total_games  # Calculate average game length
 
-                # # Check if we should save a checkpoint
-                self.check_and_save_checkpoints(win_rate)
+                # Check if we should save a checkpoint based on win rate thresholds
+                newly_saved_thresholds = check_and_save_checkpoints(
+                    self.fabric, 
+                    self.network, 
+                    self.optimizer,
+                    self.cfg.checkpoint_dir,
+                    self.cfg.store_checkpoint_thresholds,
+                    self.saved_thresholds,
+                    win_rate,
+                    iteration
+                )
+                self.saved_thresholds.update(newly_saved_thresholds)
 
                 # If win rate exceeds threshold, update fixed network to current network
                 if win_rate >= self.cfg.update_fixed_network_threshold:
@@ -598,74 +539,12 @@ class SelfPlayTrainer:
 
 
 def main(args):
-    if args.count_params:
-        # Just create a network and print parameter counts without starting training
-        network = Network(
-            channel_sequence=[192, 224, 256, 256],
-            repeats=[2, 2, 1, 1],
-            batch_size=1
-        )
-        network.reset()
-        print_parameter_breakdown(network)
-        return
-        
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
 
 
-def clean_checkpoint(checkpoint_path, output_path=None):
-    """
-    Loads a checkpoint, removes the config object and threshold-related fields,
-    renames 'state_dict' to 'model', and re-saves it for compatibility with load_fabric_checkpoint.
-
-    Args:
-        checkpoint_path (str): Path to the original checkpoint file.
-        output_path (str, optional): Path to save the cleaned checkpoint.
-                                     If not provided, will overwrite the original.
-    """
-    print(f"Cleaning checkpoint from {checkpoint_path} to {output_path}")
-    # Load the checkpoint from the specified file.
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    print(checkpoint.keys())
-
-    # Create a new structure with 'model' instead of 'state_dict'
-    new_checkpoint = {}
-
-    # Check if state_dict exists and rename it to model
-    if "state_dict" in checkpoint:
-        print("Renaming 'state_dict' to 'model' for compatibility with load_fabric_checkpoint")
-        new_checkpoint["model"] = checkpoint["state_dict"]
-    else:
-        print("No 'state_dict' key found in checkpoint.")
-        return
-
-    # Copy any other fields you want to keep
-    fields_to_keep = ["optimizer_states"]  # Add any other fields you want to keep
-    for field in fields_to_keep:
-        if field in checkpoint:
-            new_checkpoint[field] = checkpoint[field]
-
-    # Remove the problematic fields if they exist
-    fields_to_remove = ["config", "threshold", "saved_thresholds"]
-    for field in fields_to_remove:
-        if field in checkpoint:
-            print(f"Not copying '{field}' to new checkpoint.")
-        else:
-            print(f"No '{field}' key found in checkpoint.")
-
-    # Determine the output path: either overwrite or save to a new file.
-    if output_path is None:
-        output_path = checkpoint_path
-
-    # Save the cleaned checkpoint.
-    torch.save(new_checkpoint, output_path)
-    print(f"Checkpoint successfully saved to '{output_path}' with 'state_dict' renamed to 'model'.")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Self-Play Configuration")
-    parser.add_argument("--count-params", action="store_true", 
-                      help="Just count parameters and exit without training")
     args = parser.parse_args()
     main(args)
