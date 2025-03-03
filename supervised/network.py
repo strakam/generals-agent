@@ -29,13 +29,8 @@ class Network(L.LightningModule):
             nn.Linear(h * w, 1),
         )
 
-        self.square_head = nn.Sequential(
-            Pyramid(final_channels, [1], [final_channels]),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-        )
-
-        self.direction_head = nn.Sequential(
-            Pyramid(final_channels + 1, [1], [final_channels]),
+        self.policy_head = nn.Sequential(
+            Pyramid(final_channels, [2], [final_channels]),
             nn.Conv2d(final_channels, 9, kernel_size=3, padding=1),
         )
 
@@ -45,8 +40,7 @@ class Network(L.LightningModule):
         if compile:
             self.backbone = torch.compile(self.backbone)
             self.value_head = torch.compile(self.value_head)
-            self.square_head = torch.compile(self.square_head)
-            self.direction_head = torch.compile(self.direction_head)
+            self.policy_head = torch.compile(self.policy_head)
 
     @torch.compile
     def normalize_observations(self, obs):
@@ -89,14 +83,15 @@ class Network(L.LightningModule):
         value = self.value_head(x)
 
         direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(x).flatten(1)
+        # square_logits = self.square_head(x).flatten(1)
 
-        # Use Gumbel softmax to sample from the square distribution
-        square_gumbel = F.gumbel_softmax(square_logits, hard=True, dim=1)
-        square_reshaped = square_gumbel.reshape(-1, 1, 24, 24)
+        # # Use Gumbel softmax to sample from the square distribution
+        # temperature = 0.3
+        # square_gumbel = F.gumbel_softmax(square_logits, hard=True, dim=1, tau=temperature)
+        # square_reshaped = square_gumbel.reshape(-1, 1, 24, 24)
         
-        representation_with_square = torch.cat((x, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
+        # representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        direction = self.policy_head(x)
         direction = direction + direction_mask
 
         # Create combined logits for square+direction combinations
@@ -202,8 +197,7 @@ class Network(L.LightningModule):
         high_level_modules = {
             "backbone": self.backbone,
             "value_head": self.value_head,
-            "square_head": self.square_head,
-            "direction_head": self.direction_head,
+            "policy_head": self.policy_head,
         }
 
         for name, module in high_level_modules.items():
