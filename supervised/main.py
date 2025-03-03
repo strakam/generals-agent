@@ -18,7 +18,7 @@ class TrainingConfig:
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
     buffer_size: int = 18000
-    batch_size: int = 1732
+    batch_size: int = 1920
     n_workers: int = 32
     # Training parameters
     learning_rate: float = 2e-4
@@ -126,7 +126,7 @@ def main():
     if config.model_ckpt:
         # Load checkpoint but override learning rate
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = Network(lr=config.learning_rate, compile=True)
+        model = Network(lr=config.learning_rate, compile=False)
         state_dict = torch.load(config.model_ckpt, map_location=device)["state_dict"]
         model.load_state_dict(state_dict)
         trainer.fit(model, train_dataloaders=dataloader)
