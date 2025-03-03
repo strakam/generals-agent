@@ -2,7 +2,6 @@
 - critic sometimes very bad - should I do all-knowing critic?
 - argmax vs sampling -- not sure, but argmax seems to work better
 - interleave or simultaneous or independent? 
-- gumbel softmax
 
 
 Next steps:
@@ -10,3 +9,7 @@ Next steps:
 2. Split actions + gumbel softmax
 3/4. RNN vs game theory approach (read FSP,..)
 5. Hyperparams and larger scale training
+
+
+
+- weakness demo: https://generals.io/replays/OHj_Y5GgK?p=Pep+Guardiola (memory)
