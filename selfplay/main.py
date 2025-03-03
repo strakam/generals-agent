@@ -57,11 +57,11 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "step=24000.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/larger/"
+    checkpoint_path: str = "cp_1.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/larger2/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.475, 0.50])
-    update_fixed_network_threshold: float = 0.50
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.475])
+    update_fixed_network_threshold: float = 0.475
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -479,7 +479,7 @@ class SelfPlayTrainer:
                     self.cfg.store_checkpoint_thresholds,
                     self.saved_thresholds,
                     win_rate,
-                    iteration
+                    self.self_play_iteration
                 )
                 self.saved_thresholds.update(newly_saved_thresholds)
 
@@ -490,6 +490,7 @@ class SelfPlayTrainer:
                     )
                     self.fixed_network.load_state_dict(self.network.state_dict())
                     self.self_play_iteration += 1
+                    self.saved_thresholds.clear()
 
             else:
                 win_rate = draw_rate = loss_rate = avg_game_length = 0.0
