@@ -62,17 +62,17 @@ class SelfPlayConfig:
     checkpoint_path: str = "snowballer.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/baller2/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47, 0.48, 0.50])
-    update_fixed_network_threshold: float = 0.50
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47])
+    update_fixed_network_threshold: float = 0.47
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.95  # GAE lambda parameter
+    gae_lambda: float = 0.9  # GAE lambda parameter
     learning_rate: float = 6e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.5  # Value function coefficient
+    vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 

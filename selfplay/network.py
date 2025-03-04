@@ -264,8 +264,12 @@ class Network(L.LightningModule):
         pg_loss2 = -advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-        # Value loss calculation
-        value_loss = 0.5 * ((newvalues - returns) ** 2).mean()
+        # Value loss with clipping
+        v_loss_unclipped = (newvalues - returns) ** 2
+        v_clipped = values + torch.clamp(newvalues - values, -0.1, 0.1)
+        v_loss_clipped = (v_clipped - returns) ** 2
+        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+        value_loss = 0.5 * v_loss_max.mean()
 
         # Entropy loss
         entropy_loss = entropy.mean()
