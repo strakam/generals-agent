@@ -51,10 +51,10 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 600
-    n_steps: int = 700
-    batch_size: int = 600
-    n_epochs: int = 4
+    n_envs: int = 500
+    n_steps: int = 800
+    batch_size: int = 500
+    n_epochs: int = 3
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
