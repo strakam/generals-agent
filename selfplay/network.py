@@ -365,7 +365,6 @@ class Network(L.LightningModule):
         is_half_army = (adjusted_direction >= 4) & (adjusted_direction < 8)
         is_pass = adjusted_direction == 8
 
-        print("alsjdasd")
         # Convert back to the original direction format (0-3 for directions, 4 for pass)
         final_direction = torch.where(
             is_pass,

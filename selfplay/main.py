@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import torch
 from dataclasses import dataclass, field
@@ -376,7 +377,7 @@ class SelfPlayTrainer:
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
         for iteration in range(1, self.cfg.training_iterations + 1):
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
-
+            start_time = time.time()
             for step in range(0, self.cfg.n_steps):
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
@@ -531,8 +532,10 @@ class SelfPlayTrainer:
                 "logprobs": b_logprobs,
                 "masks": b_masks,
             }
-
+            print(f"Time taken for gathering: {time.time() - start_time:.2f} seconds")
+            train_start_time = time.time()
             self.train(self.fabric, dataset)
+            print(f"Time taken for training: {time.time() - train_start_time:.2f} seconds")
 
         self.logger.close()
 

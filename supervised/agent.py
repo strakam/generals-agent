@@ -254,7 +254,6 @@ class OnlineAgent(NeuroAgent):
         history_size: int | None = DEFAULT_HISTORY_SIZE,
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
-        print(f"My id is {id}")
         super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
