@@ -139,8 +139,7 @@ class Network(L.LightningModule):
         x = self.backbone(obs)
         value = self.value_head(x)
 
-        direction = self.policy_head(x)
-        direction = direction + direction_mask
+        direction = self.policy_head(x) + direction_mask
 
         # Reshape direction to [batch, 9, 24*24]
         direction_flat = direction.view(direction.shape[0], 9, -1)
@@ -156,6 +155,7 @@ class Network(L.LightningModule):
         adjusted_direction = combined_idx // (24 * 24)  # Integer division to get direction
         position = combined_idx % (24 * 24)  # Remainder gives position
         i, j = position // 24, position % 24
+        print("hi")
 
         # Determine if it's a half-army move and the direction
         is_half_army = (adjusted_direction >= 4) & (adjusted_direction < 8)
@@ -164,7 +164,7 @@ class Network(L.LightningModule):
         # Convert back to the original direction format (0-3 for directions, 4 for pass)
         final_direction = torch.where(
             is_pass,
-            torch.full_like(adjusted_direction, 4),  # Pass is direction 4
+            torch.full_like(adjusted_direction, 8),  # Pass is direction 4
             torch.where(
                 is_half_army,
                 adjusted_direction - 4,  # Half army directions (4-7) -> (0-3)
@@ -175,7 +175,7 @@ class Network(L.LightningModule):
         # Create action tensor with shape [batch_size, 5]
         zeros = torch.zeros_like(i, dtype=torch.float)
         action = torch.stack([zeros, i, j, final_direction, is_half_army.long()], dim=1)
-        action[action[:, 3] == 4, 0] = 1  # pass action
+        action[action[:, 3] == 8, 0] = 1  # pass action
 
         return action, value
 

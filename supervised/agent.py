@@ -7,7 +7,7 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from supervised.network import Network
+from selfplay.network import Network
 
 GRID_SIZE = 24
 DEFAULT_HISTORY_SIZE = 7
@@ -223,8 +223,8 @@ class NeuroAgent(Agent):
         mask = torch.from_numpy(mask).float().to(self.device)
 
         with torch.no_grad():
-            # action, logprob, entropy = self.network(self.last_observation, mask)
-            action, value = self.network.predict(self.last_observation, mask)
+            action, logprob, _, value = self.network(self.last_observation, mask)
+            # action, value = self.network.predict(self.last_observation, mask)
 
         # Sample from distributions instead of using argmax
         return action.cpu().numpy().astype(int), value.cpu().numpy().astype(float)
@@ -254,6 +254,7 @@ class OnlineAgent(NeuroAgent):
         history_size: int | None = DEFAULT_HISTORY_SIZE,
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
+        print(f"My id is {id}")
         super().__init__(network, id, history_size, 1, device)
 
     def act(self, obs: Observation) -> Action:
@@ -264,7 +265,6 @@ class OnlineAgent(NeuroAgent):
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action, value = super().act(obs, mask)
-        # print(f"Value: {value}")
         return action[0]
 
     def precompile(self):

@@ -201,18 +201,23 @@ class Network(L.LightningModule):
         return obs
 
     @torch.compile(dynamic=False, fullgraph=True)
-    def prepare_masks(self, mask):
-        mask = 1 - mask.permute(0, 3, 1, 2)
-        B, C, h, w = mask.shape
-        mask = torch.full((B, C, 24, 24), 1, device=self.device, dtype=mask.dtype)
-        mask[:, :, :h, :w] = mask
+    def prepare_masks(self, direction_mask):
+        direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
+        pad_h = 24 - direction_mask.shape[2]
+        pad_w = 24 - direction_mask.shape[3]
+        mask = F.pad(direction_mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
 
-        full_mask = mask[:, :4, :, :]
-        half_mask = mask[:, :4, :, :]
-        zero_layer = torch.zeros(B, 1, 24, 24, device=self.device)
-        mask = torch.cat((full_mask, half_mask, zero_layer), dim=1) * -1e9
+        # We now need to extend the direction mask for 9 directions (4 full army, 4 half army, 1 pass)
+        # Duplicate the first 4 channels (UP, DOWN, LEFT, RIGHT) for half-army moves
+        # The last channel is for PASS
+        full_mask = mask[:, :4, :, :]  # First 4 channels (UP, DOWN, LEFT, RIGHT)
+        half_mask = mask[:, :4, :, :]  # Duplicate for half-army moves
+        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
 
-        return mask
+        direction_mask = torch.cat((full_mask, half_mask, zero_layer), dim=1)
+        direction_mask = direction_mask * -1e9
+
+        return direction_mask
 
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
@@ -332,57 +337,53 @@ class Network(L.LightningModule):
 
         return loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs
 
-    @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
-        obs = self.normalize_observations(obs.float())
-        mask = self.prepare_masks(mask.float())
+        obs = self.normalize_observations(obs)
+        direction_mask = self.prepare_masks(mask)
 
-        representation = self.backbone(obs)
+        x = self.backbone(obs)
+        value = self.value_head(x)
 
-        value = self.value_head(representation)
-        action_logits = self.policy_head(representation) + mask
-        action_logits = action_logits + mask
+        direction = self.policy_head(x) + direction_mask
 
-        # Use argmax for direction
-        action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
-        combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
+        # Reshape direction to [batch, 9, 24*24]
+        direction_flat = direction.view(direction.shape[0], 9, -1)
+
+        # Create a tensor of shape [batch, 9*24*24] containing all possible square+direction combinations
+        combined_logits = direction_flat.reshape(direction.shape[0], -1)
+
+        # Get the argmax index from combined logits
         combined_idx = torch.argmax(combined_logits, dim=1)
 
-        # Calculate grid position (i, j) and direction from the action index
-        # Direction: 0-3 for full army moves (UP, DOWN, LEFT, RIGHT)
-        #            4-7 for half army moves (UP, DOWN, LEFT, RIGHT)
-        #            8 for PASS
-        direction = combined_idx // (24 * 24)  # Integer division to get direction
+        # Extract direction and position from combined index
+        # combined_idx = (direction * 24 * 24) + (i * 24) + j
+        adjusted_direction = combined_idx // (24 * 24)  # Integer division to get direction
         position = combined_idx % (24 * 24)  # Remainder gives position
-        i = position // 24
-        j = position % 24
+        i, j = position // 24, position % 24
 
-        # Determine if it's a half-army move (directions 4-7)
-        is_half_army = (direction >= 4) & (direction < 8)
+        # Determine if it's a half-army move and the direction
+        is_half_army = (adjusted_direction >= 4) & (adjusted_direction < 8)
+        is_pass = adjusted_direction == 8
 
-        # Determine if it's a pass action (direction 8)
-        is_pass = direction == 8
-
-        # Convert to original direction format (0-3 for directions, 8 for pass)
+        print("alsjdasd")
+        # Convert back to the original direction format (0-3 for directions, 4 for pass)
         final_direction = torch.where(
             is_pass,
-            torch.full_like(direction, 8),  # Pass is direction 8
+            torch.full_like(adjusted_direction, 8),  # Pass is direction 4
             torch.where(
                 is_half_army,
-                direction - 4,  # Half army directions (4-7) -> (0-3)
-                direction,  # Full army directions (0-3) stay the same
+                adjusted_direction - 4,  # Half army directions (4-7) -> (0-3)
+                adjusted_direction,  # Full army directions (0-3) stay the same
             ),
         )
 
         # Create action tensor with shape [batch_size, 5]
-        # Format: [is_pass, i, j, direction, is_half_army]
         zeros = torch.zeros_like(i, dtype=torch.float)
-        action_tensor = torch.stack([zeros, i.float(), j.float(), final_direction.float(), is_half_army.float()], dim=1)
+        action = torch.stack([zeros, i, j, final_direction, is_half_army.long()], dim=1)
+        action[action[:, 3] == 8, 0] = 1  # pass action
 
-        # Set is_pass flag (index 0) for pass actions
-        action_tensor[is_pass, 0] = 1.0
+        return action, value
 
-        return action_tensor, value
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
