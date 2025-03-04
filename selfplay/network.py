@@ -32,16 +32,6 @@ class Network(L.LightningModule):
         self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
         final_channels = channel_sequence[0]
 
-        self.square_head = nn.Sequential(
-            Pyramid(final_channels, [1], [final_channels]),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
-        )
-
-        self.direction_head = nn.Sequential(
-            Pyramid(final_channels + 1, [1], [final_channels]),
-            nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
-        )
-
         self.value_head = nn.Sequential(
             Pyramid(final_channels, [], []),
             nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
@@ -50,13 +40,16 @@ class Network(L.LightningModule):
             nn.Linear(24 * 24, 1),
         )
 
-        self.square_loss = nn.CrossEntropyLoss()
-        self.direction_loss = nn.CrossEntropyLoss()
+        self.policy_head = nn.Sequential(
+            Pyramid(final_channels, [2], [final_channels]),
+            nn.Conv2d(final_channels, 9, kernel_size=3, padding=1),
+        )
+
+        self.action_loss = nn.CrossEntropyLoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone, fullgraph=True, dynamic=False)
-            self.square_head = torch.compile(self.square_head, fullgraph=True, dynamic=False)
-            self.direction_head = torch.compile(self.direction_head, fullgraph=True, dynamic=False)
+            self.policy_head = torch.compile(self.policy_head, fullgraph=True, dynamic=False)
             self.value_head = torch.compile(self.value_head, fullgraph=True, dynamic=False)
 
     @torch.compile(dynamic=False, fullgraph=True)
@@ -97,6 +90,8 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
+            "last_enemy_army_seen_value",
+            "last_enemy_army_seen_timestep",
         ]
 
         for attr in attributes_to_reset:
@@ -206,63 +201,75 @@ class Network(L.LightningModule):
         return obs
 
     @torch.compile(dynamic=False, fullgraph=True)
-    def prepare_masks(self, obs, direction_mask):
-        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
-        direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
-        B, C, h, w = direction_mask.shape
-        mask = torch.full((B, C, 24, 24), 1, device=self.device, dtype=direction_mask.dtype)
-        mask[:, :, :h, :w] = direction_mask
-        zero_layer = torch.zeros(B, 1, 24, 24, device=self.device)
-        direction_mask = torch.cat((mask, zero_layer), dim=1) * -1e9
+    def prepare_masks(self, mask):
+        mask = 1 - mask.permute(0, 3, 1, 2)
+        B, C, h, w = mask.shape
+        mask = torch.full((B, C, 24, 24), 1, device=self.device, dtype=mask.dtype)
+        mask[:, :, :h, :w] = mask
 
-        return square_mask, direction_mask
+        full_mask = mask[:, :4, :, :]
+        half_mask = mask[:, :4, :, :]
+        zero_layer = torch.zeros(B, 1, 24, 24, device=self.device)
+        mask = torch.cat((full_mask, half_mask, zero_layer), dim=1) * -1e9
+
+        return mask
 
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
-        square_mask, direction_mask = self.prepare_masks(obs, mask.float())
+        mask = self.prepare_masks(mask.float())
 
         # Use no_grad for backbone computation since it's frozen
         with torch.no_grad():
             representation = self.backbone(obs)
 
         value = self.value_head(representation).flatten()
+        action_logits = self.policy_head(representation) + mask
 
-        square_logits_unmasked = self.square_head(representation)
-        square_logits = (square_logits_unmasked + square_mask).flatten(1)
-
-        # Sample square from categorical distribution
-        square_dist = torch.distributions.Categorical(logits=square_logits)
+        # Prepare flattened logits for categorical distribution
+        action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
+        combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
+        action_dist = torch.distributions.Categorical(logits=combined_logits)
+        
         if action is None:
-            square = square_dist.sample()
+            # Sample action
+            combined_idx = action_dist.sample()
+            
+            # Convert combined index to action components
+            direction = combined_idx // (24 * 24)
+            position = combined_idx % (24 * 24)
+            i, j = position // 24, position % 24
+            
+            # Determine action type
+            is_half_army = (direction >= 4) & (direction < 8)
+            is_pass = direction == 8
+            
+            # Create standardized action format
+            final_direction = torch.where(is_pass, 
+                                         torch.full_like(direction, 8), 
+                                         torch.where(is_half_army, direction - 4, direction))
+            
+            # Create action tensor: [is_pass, i, j, direction, is_half_army]
+            action = torch.stack([
+                is_pass.float(),  # Directly use is_pass instead of zeros + update
+                i.float(), 
+                j.float(), 
+                final_direction.float(), 
+                is_half_army.float()
+            ], dim=1)
         else:
-            square = action[:, 1] * 24 + action[:, 2]
-        i, j = square // 24, square % 24
-
-        # Get direction logits based on sampled square
-        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
-        direction += direction_mask
-        direction = direction[torch.arange(direction.shape[0]), :, i.long(), j.long()]
-
-        # Sample direction
-        direction_dist = torch.distributions.Categorical(logits=direction)
-        if action is None:
-            direction = direction_dist.sample()
-        else:
-            direction = action[:, 3]
-
-        # Calculate log probabilities
-        square_logprob = square_dist.log_prob(square)
-        direction_logprob = direction_dist.log_prob(direction)
-        logprob = square_logprob + direction_logprob
-
-        entropy = square_dist.entropy() + direction_dist.entropy()
-
-        # Create action tensor with shape [batch_size, 5]
-        zeros = torch.zeros_like(square, dtype=torch.float)
-        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
-        action[action[:, 3] == 4, 0] = 1  # pass action
+            # Calculate combined index from existing action
+            target_i, target_j = action[:, 1], action[:, 2]
+            target_direction, is_half_army = action[:, 3], action[:, 4]
+            
+            adjusted_direction = torch.where(target_direction < 4,
+                                            target_direction + 4 * is_half_army,
+                                            torch.full_like(target_direction, 8))
+            
+            combined_idx = adjusted_direction * 24 * 24 + target_i * 24 + target_j
+        
+        # Calculate log probability and entropy
+        logprob = action_dist.log_prob(combined_idx)
+        entropy = action_dist.entropy()
 
         return action, value, logprob, entropy
 
@@ -328,37 +335,54 @@ class Network(L.LightningModule):
     @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
         obs = self.normalize_observations(obs.float())
-        square_mask, direction_mask = self.prepare_masks(obs, mask.float())
+        mask = self.prepare_masks(mask.float())
 
-        # Use no_grad for backbone computation since it's frozen
         representation = self.backbone(obs)
 
-        value = self.value_head(representation).flatten()
-
-        # Get square logits and apply mask
-        square_logits_unmasked = self.square_head(representation)
-        square_logits = (square_logits_unmasked + square_mask).flatten(1)
-
-        # Use argmax instead of sampling
-        square = square_logits.argmax(dim=1).long()
-        i, j = square // 24, square % 24
-
-        # Get direction logits based on selected square
-        square_reshaped = F.one_hot(square, num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((representation, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
-        direction += direction_mask
-        direction = direction[torch.arange(direction.shape[0]), :, i, j]
+        value = self.value_head(representation)
+        action_logits = self.policy_head(representation) + mask
+        action_logits = action_logits + mask
 
         # Use argmax for direction
-        direction = direction.argmax(dim=1)
+        action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
+        combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
+        combined_idx = torch.argmax(combined_logits, dim=1)
+
+        # Calculate grid position (i, j) and direction from the action index
+        # Direction: 0-3 for full army moves (UP, DOWN, LEFT, RIGHT)
+        #            4-7 for half army moves (UP, DOWN, LEFT, RIGHT)
+        #            8 for PASS
+        direction = combined_idx // (24 * 24)  # Integer division to get direction
+        position = combined_idx % (24 * 24)  # Remainder gives position
+        i = position // 24
+        j = position % 24
+
+        # Determine if it's a half-army move (directions 4-7)
+        is_half_army = (direction >= 4) & (direction < 8)
+
+        # Determine if it's a pass action (direction 8)
+        is_pass = direction == 8
+
+        # Convert to original direction format (0-3 for directions, 8 for pass)
+        final_direction = torch.where(
+            is_pass,
+            torch.full_like(direction, 8),  # Pass is direction 8
+            torch.where(
+                is_half_army,
+                direction - 4,  # Half army directions (4-7) -> (0-3)
+                direction,  # Full army directions (0-3) stay the same
+            ),
+        )
 
         # Create action tensor with shape [batch_size, 5]
-        zeros = torch.zeros_like(square, dtype=torch.float)
-        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
-        action[action[:, 3] == 4, 0] = 1  # pass action
+        # Format: [is_pass, i, j, direction, is_half_army]
+        zeros = torch.zeros_like(i, dtype=torch.float)
+        action_tensor = torch.stack([zeros, i.float(), j.float(), final_direction.float(), is_half_army.float()], dim=1)
 
-        return action, value
+        # Set is_pass flag (index 0) for pass actions
+        action_tensor[is_pass, 0] = 1.0
+
+        return action_tensor, value
 
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
@@ -370,8 +394,7 @@ class Network(L.LightningModule):
 
         # Only optimize the heads
         trainable_params = []
-        trainable_params.extend(self.square_head.parameters())
-        trainable_params.extend(self.direction_head.parameters())
+        trainable_params.extend(self.policy_head.parameters())
         trainable_params.extend(self.value_head.parameters())
 
         optimizer = torch.optim.AdamW(trainable_params, lr=lr, amsgrad=True, eps=1e-07)
@@ -379,11 +402,11 @@ class Network(L.LightningModule):
         return optimizer, scheduler
 
     def on_after_backward(self):
-        # Track gradients for high-level modules: backbone, value_head, square_head, direction_head
+        # Track gradients for high-level modules: backbone, value_head, policy_head
         high_level_modules = {
             "backbone": self.backbone,
-            "square_head": self.square_head,
-            "direction_head": self.direction_head,
+            "policy_head": self.policy_head,
+            "value_head": self.value_head,
         }
 
         grad_norms = {}

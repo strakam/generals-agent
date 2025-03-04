@@ -49,28 +49,28 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 500
-    n_steps: int = 700
+    n_envs: int = 400
+    n_steps: int = 800
     batch_size: int = 500
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_1.ckpt"
+    checkpoint_path: str = "supervised_M.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/larger2/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.475])
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.425, 0.45, 0.475])
     update_fixed_network_threshold: float = 0.475
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 6e-6  # Standard PPO learning rate
+    gae_lambda: float = 0.9  # GAE lambda parameter
+    learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.5  # Value function coefficient
+    vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 
