@@ -223,8 +223,8 @@ class NeuroAgent(Agent):
         mask = torch.from_numpy(mask).float().to(self.device)
 
         with torch.no_grad():
-            action, logprob, _, value = self.network(self.last_observation, mask)
-            # action, value = self.network.predict(self.last_observation, mask)
+            # action, logprob, _, value = self.network(self.last_observation, mask)
+            action, value = self.network.predict(self.last_observation, mask)
 
         # Sample from distributions instead of using argmax
         return action.cpu().numpy().astype(int), value.cpu().numpy().astype(float)

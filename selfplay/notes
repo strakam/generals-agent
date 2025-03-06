@@ -1,15 +1,17 @@
+
 - shaping vs currciulum - not well explored by me
-- critic sometimes very bad - should I do all-knowing critic?
+- Critic veeery weird
 - argmax vs sampling -- not sure, but argmax seems to work better
 - interleave or simultaneous or independent? 
 
 
 Next steps:
-1. Larger model + new features, now on larger maps too.
-2. Split actions + gumbel softmax
+1. Larger model, now on larger maps too.
+2. Half army actions
 3/4. RNN vs game theory approach (read FSP,..)
 5. Hyperparams and larger scale training
 
 
 
 - weakness demo: https://generals.io/replays/OHj_Y5GgK?p=Pep+Guardiola (memory)
+- fun nice behavior: https://generals.io/replays/Xi798NT7y?p=Average+Joe

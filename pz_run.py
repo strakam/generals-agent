@@ -34,7 +34,7 @@ class ShapedRewardFn(RewardFn):
 
 # agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
 # agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
-agent1 = load_fabric_checkpoint("checkpoints/selfplay/hehe.ckpt", mode="online")
+agent1 = load_fabric_checkpoint("checkpoints/selfplay/cp_1_threshold_42.ckpt", mode="online")
 agent2 = load_fabric_checkpoint("checkpoints/selfplay/step=48000.ckpt", mode="online")
 # agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
 
