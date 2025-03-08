@@ -36,41 +36,42 @@ class ShapedRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+        city_change = obs.owned_city_count - prior_obs.owned_city_count
         # If the game is done, we dont want to shape the reward
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
-            return original_reward
+            return original_reward + 0.5 * city_change
 
         prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
 
-        return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+        return float(original_reward + 0.5 * city_change + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
 
 
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 400
-    n_steps: int = 800
-    batch_size: int = 500
+    n_envs: int = 128
+    n_steps: int = 3000
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
     checkpoint_path: str = "supervised_M.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/larger2/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/castles/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.425, 0.45, 0.475])
-    update_fixed_network_threshold: float = 0.475
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
+    update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.9  # GAE lambda parameter
+    gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.01  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.00  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages

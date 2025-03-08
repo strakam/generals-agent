@@ -343,7 +343,6 @@ class Network(L.LightningModule):
 
         x = self.backbone(obs)
         value = self.value_head(x)
-
         direction = self.policy_head(x) + direction_mask
 
         # Reshape direction to [batch, 9, 24*24]
