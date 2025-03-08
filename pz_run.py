@@ -3,6 +3,7 @@ from generals import PettingZooGenerals, GridFactory
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
+from models.snowballer import Network
 import numpy as np
 
 n_envs = 1
@@ -32,11 +33,8 @@ class ShapedRewardFn(RewardFn):
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
 
 
-# agent1 = load_fabric_checkpoint("checkpoints/selfplay/cp_3.ckpt", mode="online")
-# agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
-agent1 = load_fabric_checkpoint("checkpoints/selfplay/step=4000.ckpt", mode="online")
-agent2 = load_fabric_checkpoint("checkpoints/selfplay/step=4000.ckpt", mode="online")
-# agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
+agent1 = Network.load_from_checkpoint(batch_size=1)
+agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
 
 agent_names = ["cp_3", "snowballer"]
 agents = {agent_names[0]: agent1, agent_names[1]: agent2}

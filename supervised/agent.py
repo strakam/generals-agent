@@ -7,10 +7,10 @@ from generals.agents import Agent
 from generals.core.observation import Observation
 from torch.nn.functional import max_pool2d
 from functools import wraps
-from supervised.network import Network
+from selfplay.network import Network
 
 GRID_SIZE = 24
-DEFAULT_HISTORY_SIZE = 7
+DEFAULT_HISTORY_SIZE = 5
 DEFAULT_BATCH_SIZE = 1
 
 
@@ -200,8 +200,8 @@ class NeuroAgent(Agent):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
-                self.last_enemy_army_seen_timestep,
-                self.last_enemy_army_seen_value,
+                # self.last_enemy_army_seen_timestep,
+                # self.last_enemy_army_seen_value,
             ],
             dim=1,
         )
@@ -348,7 +348,7 @@ def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", e
     checkpoint = torch.load(path, map_location=device)
 
     # Create a new network
-    network = Network(channel_sequence=[256, 256, 288, 288], repeats=[2, 2, 2, 1], compile=True)
+    network = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
 
     # Extract the state dict from the checkpoint
     if isinstance(checkpoint, dict):
