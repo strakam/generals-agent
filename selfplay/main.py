@@ -10,7 +10,7 @@ from lightning.fabric import Fabric
 from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import RewardFn, compute_num_generals_owned
+from generals.core.rewards import RewardFn, compute_num_generals_owned, compute_num_cities_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
@@ -25,26 +25,26 @@ torch.set_float32_matmul_precision("medium")
 class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
 
-    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.75):
+    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
         ratio = my_army / opponent_army
         ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -0.5), 1.0)
+        return np.minimum(np.maximum(ratio, -1.0), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        city_change = obs.owned_city_count - prior_obs.owned_city_count
         # If the game is done, we dont want to shape the reward
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
-            return original_reward + 0.5 * city_change
+            return original_reward
 
         prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
+        ratio_reward = current_ratio_reward - prev_ratio_reward
 
-        return float(original_reward + 0.5 * city_change + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+        return float(original_reward + self.shaping_weight * ratio_reward)
 
 
 @dataclass
@@ -55,11 +55,11 @@ class SelfPlayConfig:
     n_steps: int = 3000
     batch_size: int = 600
     n_epochs: int = 4
-    truncation: int = 1000
+    truncation: int = 1500
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_path: str = ""
     checkpoint_dir: str = "/storage/praha1/home/strakam3/castles/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
