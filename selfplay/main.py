@@ -22,6 +22,7 @@ from model_utils import (
 
 torch.set_float32_matmul_precision("medium")
 
+
 @nb.njit
 def calculate_army_size(castles, ownership):
     return np.sum(castles * ownership)
@@ -29,6 +30,7 @@ def calculate_army_size(castles, ownership):
 
 class CityRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of cities owned."""
+
     def __init__(self, shaping_weight: float = 0.5):
         self.shaping_weight = shaping_weight
 
@@ -44,8 +46,10 @@ class CityRewardFn(RewardFn):
 
         return float(original_reward + self.shaping_weight * city_change)
 
+
 class RatioRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
+
     def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
@@ -57,7 +61,6 @@ class RatioRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        city_change = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
         # If the game is done, we dont want to shape the reward
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
             return original_reward
@@ -66,7 +69,34 @@ class RatioRewardFn(RewardFn):
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
         ratio_reward = current_ratio_reward - prev_ratio_reward
 
-        return float(original_reward + self.shaping_weight * ratio_reward + 0.25 * city_change)
+        return float(original_reward + self.shaping_weight * ratio_reward)
+
+
+class CompositeRewardFn(RewardFn):
+    """A reward function that shapes the reward based on the number of cities owned."""
+
+    def __init__(self):
+        self.city_weight = 0.3
+        self.city_holding_weight = 0.01
+        self.ratio_weight = 0.01
+        self.maximum_ratio = 1.2
+
+    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
+        ratio = my_army / opponent_army
+        ratio = np.log(ratio) / np.log(self.maximum_ratio)
+        return np.minimum(np.maximum(ratio, -1.0), 1.0)
+
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+        cities_owned = compute_num_cities_owned(obs)
+        city_change = cities_owned - compute_num_cities_owned(prior_obs)
+        ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
+        return float(
+            original_reward
+            + self.city_weight * city_change
+            + self.ratio_weight * ratio_reward
+            + self.city_holding_weight * cities_owned
+        )
 
 
 @dataclass
@@ -81,14 +111,14 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "schooler.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/castles_shape/"
+    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/explicit/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
     update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
-    gamma: float = 1.0  # Discount factor
+    gamma: float = 0.992  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
@@ -208,7 +238,7 @@ class SelfPlayTrainer:
             self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
-        
+
         # Print detailed parameter breakdown
         if self.fabric.is_global_zero:
             print_parameter_breakdown(self.network)
@@ -496,14 +526,14 @@ class SelfPlayTrainer:
 
                 # Check if we should save a checkpoint based on win rate thresholds
                 newly_saved_thresholds = check_and_save_checkpoints(
-                    self.fabric, 
-                    self.network, 
+                    self.fabric,
+                    self.network,
                     self.optimizer,
                     self.cfg.checkpoint_dir,
                     self.cfg.store_checkpoint_thresholds,
                     self.saved_thresholds,
                     win_rate,
-                    self.self_play_iteration
+                    self.self_play_iteration,
                 )
                 self.saved_thresholds.update(newly_saved_thresholds)
 
@@ -558,10 +588,10 @@ class SelfPlayTrainer:
             gathering_time = time.time() - start_time
             minutes, seconds = divmod(gathering_time, 60)
             print(f"Time taken for gathering: {int(minutes)}m {seconds:.2f}s")
-            
+
             train_start_time = time.time()
             self.train(self.fabric, dataset)
-            
+
             training_time = time.time() - train_start_time
             minutes, seconds = divmod(training_time, 60)
             print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
