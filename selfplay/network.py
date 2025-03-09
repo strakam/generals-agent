@@ -120,7 +120,6 @@ class Network(L.LightningModule):
         priority = 14
 
         self.reset_histories(obs)
-
         # Calculate current army states
         current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
         current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]

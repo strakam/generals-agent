@@ -36,6 +36,7 @@ class ShapedRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+        city_change = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
         # If the game is done, we dont want to shape the reward
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
             return original_reward
@@ -44,7 +45,7 @@ class ShapedRewardFn(RewardFn):
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
         ratio_reward = current_ratio_reward - prev_ratio_reward
 
-        return float(original_reward + self.shaping_weight * ratio_reward)
+        return float(original_reward + self.shaping_weight * ratio_reward + 0.25 * city_change)
 
 
 @dataclass
@@ -533,10 +534,16 @@ class SelfPlayTrainer:
                 "logprobs": b_logprobs,
                 "masks": b_masks,
             }
-            print(f"Time taken for gathering: {time.time() - start_time:.2f} seconds")
+            gathering_time = time.time() - start_time
+            minutes, seconds = divmod(gathering_time, 60)
+            print(f"Time taken for gathering: {int(minutes)}m {seconds:.2f}s")
+            
             train_start_time = time.time()
             self.train(self.fabric, dataset)
-            print(f"Time taken for training: {time.time() - train_start_time:.2f} seconds")
+            
+            training_time = time.time() - train_start_time
+            minutes, seconds = divmod(training_time, 60)
+            print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
 
         self.logger.close()
 
