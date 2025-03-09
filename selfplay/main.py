@@ -1,4 +1,5 @@
 import time
+import numba as nb
 import numpy as np
 import torch
 from dataclasses import dataclass, field
@@ -21,10 +22,30 @@ from model_utils import (
 
 torch.set_float32_matmul_precision("medium")
 
+@nb.njit
+def calculate_army_size(castles, ownership):
+    return np.sum(castles * ownership)
 
-class ShapedRewardFn(RewardFn):
+
+class CityRewardFn(RewardFn):
+    """A reward function that shapes the reward based on the number of cities owned."""
+    def __init__(self, shaping_weight: float = 0.5):
+        self.shaping_weight = shaping_weight
+
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+
+        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
+            return original_reward
+
+        city_now = calculate_army_size(obs.cities, obs.owned_cells)
+        city_prev = calculate_army_size(prior_obs.cities, prior_obs.owned_cells)
+        city_change = city_now - city_prev
+
+        return float(original_reward + self.shaping_weight * city_change)
+
+class RatioRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
-
     def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
@@ -60,8 +81,8 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = ""
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/castles/"
+    checkpoint_path: str = "schooler.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/castles_shape/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
     update_fixed_network_threshold: float = 0.45
@@ -147,7 +168,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=grid_factory,
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=ShapedRewardFn(),
+                reward_fn=CityRewardFn(),
             )
             for _ in range(cfg.n_envs)
         ],
