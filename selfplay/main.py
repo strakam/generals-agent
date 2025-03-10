@@ -103,16 +103,16 @@ class CompositeRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 128
+    n_envs: int = 256  # Increased from 128 to 256 to utilize 2 GPUs more effectively
     n_steps: int = 3000
-    batch_size: int = 600
+    batch_size: int = 1200
     n_epochs: int = 4
     truncation: int = 1500
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "castler.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/explicit/"
+    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
     update_fixed_network_threshold: float = 0.45
@@ -129,10 +129,10 @@ class SelfPlayConfig:
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
-    strategy: str = "auto"
+    strategy: str = "ddp"
     precision: str = "32-true"
     accelerator: str = "auto"
-    devices: int = 1
+    devices: int = 2
     seed: int = 42
 
 
@@ -205,7 +205,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 reward_fn=CityRewardFn(),
             )
         )
-    
+
     return gym.vector.AsyncVectorEnv(
         envs,
         shared_memory=True,
