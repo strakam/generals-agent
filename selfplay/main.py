@@ -31,7 +31,7 @@ def calculate_army_size(castles, ownership):
 class CityRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of cities owned."""
 
-    def __init__(self, shaping_weight: float = 0.5):
+    def __init__(self, shaping_weight: float = 0.3):
         self.shaping_weight = shaping_weight
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
@@ -111,14 +111,14 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_path: str = "castler.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/explicit/"
 
     store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
     update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
-    gamma: float = 0.992  # Discount factor
+    gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
@@ -190,18 +190,24 @@ class NeptuneLogger:
 
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    grid_factory = GridFactory(mode="generalsio")
-    return gym.vector.AsyncVectorEnv(
-        [
-            lambda: GymnasiumGenerals(
+    # Create environments with different min_generals_distance values
+    envs = []
+    for i in range(cfg.n_envs):
+        # Use min_generals_distance=15 for half of the environments, 20 for the rest
+        min_dist = 15 if i < cfg.n_envs // 2 else 20
+        print(f"Creating environment with min_generals_distance={min_dist}")
+        envs.append(
+            lambda min_dist=min_dist: GymnasiumGenerals(
                 agents=agent_names,
-                grid_factory=grid_factory,
+                grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
                 reward_fn=CityRewardFn(),
             )
-            for _ in range(cfg.n_envs)
-        ],
+        )
+    
+    return gym.vector.AsyncVectorEnv(
+        envs,
         shared_memory=True,
     )
 
