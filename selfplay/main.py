@@ -103,7 +103,7 @@ class CompositeRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 256  # Increased from 128 to 256 to utilize 2 GPUs more effectively
+    n_envs: int = 128  # Increased from 128 to 256 to utilize 2 GPUs more effectively
     n_steps: int = 3000
     batch_size: int = 1200
     n_epochs: int = 4
@@ -129,10 +129,10 @@ class SelfPlayConfig:
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
-    strategy: str = "ddp"
+    strategy: str = "auto"
     precision: str = "32-true"
     accelerator: str = "auto"
-    devices: int = 2
+    devices: int = 1
     seed: int = 42
 
 
