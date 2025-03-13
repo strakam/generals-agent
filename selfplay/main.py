@@ -1,20 +1,17 @@
 import time
-import numba as nb
 import numpy as np
 import torch
 from dataclasses import dataclass, field
 from typing import List, Tuple
 import gymnasium as gym
-import argparse
 import neptune
 from lightning.fabric import Fabric
 from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import RewardFn, compute_num_generals_owned, compute_num_cities_owned
-from generals.core.observation import Observation
-from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
+from rewards import CompositeRewardFn
+from logger import NeptuneLogger
 from model_utils import (
     check_and_save_checkpoints,
     print_parameter_breakdown,
@@ -23,85 +20,11 @@ from model_utils import (
 torch.set_float32_matmul_precision("medium")
 
 
-@nb.njit
-def calculate_army_size(castles, ownership):
-    return np.sum(castles * ownership)
-
-
-class CityRewardFn(RewardFn):
-    """A reward function that shapes the reward based on the number of cities owned."""
-
-    def __init__(self, shaping_weight: float = 0.3):
-        self.shaping_weight = shaping_weight
-
-    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-
-        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
-            return original_reward
-
-        city_now = calculate_army_size(obs.cities, obs.owned_cells)
-        city_prev = calculate_army_size(prior_obs.cities, prior_obs.owned_cells)
-        city_change = city_now - city_prev
-
-        return float(original_reward + self.shaping_weight * city_change)
-
-
-class RatioRewardFn(RewardFn):
-    """A reward function that shapes the reward based on the number of generals owned."""
-
-    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
-        self.maximum_ratio = clip_value
-        self.shaping_weight = shaping_weight
-
-    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
-        ratio = my_army / opponent_army
-        ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -1.0), 1.0)
-
-    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        # If the game is done, we dont want to shape the reward
-        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
-            return original_reward
-
-        prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
-        current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
-        ratio_reward = current_ratio_reward - prev_ratio_reward
-
-        return float(original_reward + self.shaping_weight * ratio_reward)
-
-
-class CompositeRewardFn(RewardFn):
-    """A reward function that shapes the reward based on the number of cities owned."""
-
-    def __init__(self):
-        self.city_weight = 0.3
-        self.ratio_weight = 0.3
-        self.maximum_ratio = 1.5
-
-    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
-        ratio = my_army / opponent_army
-        ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -1.0), 1.0)
-
-    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-
-        previous_ratio = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
-        current_ratio = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
-        ratio_reward = current_ratio - previous_ratio
-
-        city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
-
-        return float(original_reward + self.ratio_weight * ratio_reward + self.city_weight * city_reward)
-
-
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 128
+    n_envs: int = 64
     n_steps: int = 6000
     batch_size: int = 600
     n_epochs: int = 4
@@ -133,59 +56,6 @@ class SelfPlayConfig:
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
-
-
-class NeptuneLogger:
-    """Handles logging experiment metrics to Neptune."""
-
-    def __init__(self, config: SelfPlayConfig, fabric: Fabric):
-        self.fabric = fabric
-        # Only initialize Neptune on the main process
-        if self.fabric.is_global_zero:
-            self.run = neptune.init_run(
-                project="strakam/selfplay",
-                name="generals-selfplay",
-                tags=["selfplay", "training"],
-            )
-        self.config = config
-        self._log_config()
-
-    def _log_config(self):
-        """Log experiment configuration parameters."""
-        if self.fabric.is_global_zero:
-            self.run["parameters"] = {
-                # Training hyperparameters
-                "training_iterations": self.config.training_iterations,
-                "n_steps": self.config.n_steps,
-                "n_epochs": self.config.n_epochs,
-                "batch_size": self.config.batch_size,
-                "n_envs": self.config.n_envs,
-                # Environment settings
-                "truncation": self.config.truncation,
-                # PPO hyperparameters
-                "learning_rate": self.config.learning_rate,
-                "gamma": self.config.gamma,
-                "clip_coef": self.config.clip_coef,
-                "ent_coef": self.config.ent_coef,
-                "max_grad_norm": self.config.max_grad_norm,
-                # Infrastructure settings
-                "checkpoint_path": self.config.checkpoint_path,
-                "strategy": self.config.strategy,
-                "accelerator": self.config.accelerator,
-                "precision": self.config.precision,
-                "devices": self.config.devices,
-            }
-
-    def log_metrics(self, metrics: dict):
-        """Logs a batch of metrics to Neptune."""
-        if self.fabric.is_global_zero:
-            for key, value in metrics.items():
-                self.run[f"{key}"].log(value)
-
-    def close(self):
-        """Close the Neptune run."""
-        if self.fabric.is_global_zero:
-            self.run.stop()
 
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
@@ -650,13 +520,11 @@ class SelfPlayTrainer:
         self.logger.close()
 
 
-def main(args):
+def main():
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Self-Play Configuration")
-    args = parser.parse_args()
-    main(args)
+    main()
