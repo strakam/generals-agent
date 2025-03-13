@@ -77,9 +77,8 @@ class CompositeRewardFn(RewardFn):
 
     def __init__(self):
         self.city_weight = 0.3
-        self.city_holding_weight = 0.01
-        self.ratio_weight = 0.01
-        self.maximum_ratio = 1.2
+        self.ratio_weight = 0.3
+        self.maximum_ratio = 1.5
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
         ratio = my_army / opponent_army
@@ -88,33 +87,33 @@ class CompositeRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        cities_owned = compute_num_cities_owned(obs)
-        city_change = cities_owned - compute_num_cities_owned(prior_obs)
-        ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
-        return float(
-            original_reward
-            + self.city_weight * city_change
-            + self.ratio_weight * ratio_reward
-            + self.city_holding_weight * cities_owned
-        )
+
+        previous_ratio = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
+        current_ratio = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
+        ratio_reward = current_ratio - previous_ratio
+
+        city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
+
+        return float(original_reward + self.ratio_weight * ratio_reward + self.city_weight * city_reward)
 
 
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 128  # Increased from 128 to 256 to utilize 2 GPUs more effectively
-    n_steps: int = 3000
-    batch_size: int = 1200
+    n_envs: int = 128
+    n_steps: int = 6000
+    batch_size: int = 600
     n_epochs: int = 4
-    truncation: int = 1500
+    truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_path: str = "castler.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
+    checkpoint_dir: str = "/root/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.0, 0.43, 0.45])
     update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
@@ -123,16 +122,16 @@ class SelfPlayConfig:
     learning_rate: float = 2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.00  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.003  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
-    strategy: str = "ddp"
+    strategy: str = "auto"
     precision: str = "32-true"
     accelerator: str = "auto"
-    devices: int = 2
+    devices: int = 1
     seed: int = 42
 
 
@@ -202,7 +201,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=CityRewardFn(),
+                reward_fn=CompositeRewardFn(),
             )
         )
 
@@ -251,10 +250,19 @@ class SelfPlayTrainer:
 
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.fixed_network = self.fabric.setup(self.fixed_network)
-
         self.network.reset()
-        self.fixed_network.reset()
+
+        # Load opponents
+        snowballer = load_fabric_checkpoint("snowballer.ckpt", batch_size=cfg.n_envs)
+        castler = load_fabric_checkpoint("castler.ckpt", batch_size=cfg.n_envs)
+
+        self.opponents = [snowballer, castler, self.fixed_network]
+        self.opponents = [opponent.eval() for opponent in self.opponents]
+        self.opponents = [self.fabric.setup(opponent) for opponent in self.opponents]
+
+        # Reset all opponents
+        for opponent in self.opponents:
+            opponent.reset()
 
         # Create environment.
         self.agent_names = ["1", "2"]
@@ -291,6 +299,9 @@ class SelfPlayTrainer:
             self.rewards = torch.zeros(self.rewards_shape, dtype=torch.float32, device=device)
             self.dones = torch.zeros(self.dones_shape, dtype=torch.bool, device=device)
             self.masks = torch.zeros(self.masks_shape, dtype=torch.bool, device=device)
+
+        # Add current_opponent_idx as an instance variable
+        self.current_opponent_idx = 0
 
     def train(self, fabric: Fabric, data: dict):
         """Train the network using PPO on collected rollout data."""
@@ -401,10 +412,13 @@ class SelfPlayTrainer:
             self.obs_buffer.copy_(torch.from_numpy(obs))
             self.obs_buffer = self.obs_buffer.to(self.fabric.device, non_blocking=True)
 
+            # Use the current opponent to augment player 2's observations
+            current_opponent = self.opponents[self.current_opponent_idx]
+
             augmented_obs = torch.stack(
                 [
                     self.network.augment_observation(self.obs_buffer[:, 0, ...]),
-                    self.fixed_network.augment_observation(self.obs_buffer[:, 1, ...]),
+                    current_opponent.augment_observation(self.obs_buffer[:, 1, ...]),
                 ],
                 dim=1,
             )
@@ -430,10 +444,16 @@ class SelfPlayTrainer:
         # Pre-allocate action arrays to avoid repeated numpy allocations
         _actions = np.empty((self.cfg.n_envs, 2, 5), dtype=np.int32)
 
+        # Initialize the current opponent index
+        self.current_opponent_idx = 0
+
         next_obs, infos = self.envs.reset()
         prev_obs = next_obs
         next_obs, mask, _ = self.process_observations(next_obs, infos)
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
+
+        global_step_counter = 0  # Add a global step counter to track when to switch opponents
+
         for iteration in range(1, self.cfg.training_iterations + 1):
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
@@ -441,6 +461,24 @@ class SelfPlayTrainer:
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
+
+                # Check if it's time to switch opponents
+                if global_step_counter % (self.cfg.n_steps // 3) == 0 and global_step_counter > 0:
+                    self.current_opponent_idx = (self.current_opponent_idx + 1) % len(self.opponents)
+                    self.fabric.print(f"Switching to opponent {self.current_opponent_idx}")
+                    next_obs, infos = self.envs.reset()
+                    next_obs, mask, _ = self.process_observations(next_obs, infos)
+                    next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
+
+                    # Reset the learning network
+                    self.network.reset()
+
+                    # Reset all opponents
+                    for opponent in self.opponents:
+                        opponent.reset()
+
+                global_step_counter += 1
+                current_opponent = self.opponents[self.current_opponent_idx]
 
                 with torch.no_grad(), self.fabric.device:
                     # Get actions for player 1 (learning player)
@@ -454,10 +492,10 @@ class SelfPlayTrainer:
                     self.values[step] = player1_value
                     self.logprobs[step] = player1_logprobs
 
-                    # Get actions for player 2 (fixed player) without storing
+                    # Get actions for player 2 (current opponent) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _ = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions, _ = current_opponent.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -468,6 +506,7 @@ class SelfPlayTrainer:
                         {
                             "step_mean_prob": mean_prob,
                             "step_std_prob": std_prob,
+                            "current_opponent": self.current_opponent_idx,
                         }
                     )
 
@@ -549,6 +588,12 @@ class SelfPlayTrainer:
                         f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.update_fixed_network_threshold:.2%}, updating fixed network"
                     )
                     self.fixed_network.load_state_dict(self.network.state_dict())
+                    # Also update the last opponent in the list (the fixed network opponent)
+                    self.opponents[-1] = self.fixed_network
+                    # Set up with fabric
+                    self.opponents[-1] = self.fabric.setup(self.opponents[-1])
+                    # Set to eval mode
+                    self.opponents[-1].eval()
                     self.self_play_iteration += 1
                     self.saved_thresholds.clear()
 
