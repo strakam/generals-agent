@@ -129,10 +129,10 @@ class SelfPlayConfig:
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
-    strategy: str = "auto"
+    strategy: str = "ddp"
     precision: str = "32-true"
     accelerator: str = "auto"
-    devices: int = 1
+    devices: int = 2
     seed: int = 42
 
 
