@@ -36,8 +36,8 @@ class SelfPlayConfig:
     checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
     checkpoint_dir: str = "/root/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.0, 0.43, 0.45])
-    update_fixed_network_threshold: float = 0.45
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.425, 0.45, 0.475, 0.5, 0.525, 0.55])
+    update_fixed_network_threshold: float = 0.55
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -325,6 +325,7 @@ class SelfPlayTrainer:
         global_step_counter = 0  # Add a global step counter to track when to switch opponents
 
         for iteration in range(1, self.cfg.training_iterations + 1):
+            print()
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
             for step in range(0, self.cfg.n_steps):
@@ -335,7 +336,7 @@ class SelfPlayTrainer:
                 # Check if it's time to switch opponents
                 if global_step_counter % (self.cfg.n_steps // 3) == 0 and global_step_counter > 0:
                     self.current_opponent_idx = (self.current_opponent_idx + 1) % len(self.opponents)
-                    self.fabric.print(f"Switching to opponent {self.current_opponent_idx}")
+                    self.fabric.print(f"Switching to opponent {self.current_opponent_idx} .. ", end="")
                     next_obs, infos = self.envs.reset()
                     next_obs, mask, _ = self.process_observations(next_obs, infos)
                     next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
