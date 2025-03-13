@@ -80,6 +80,9 @@ class CompositeRewardFn(RewardFn):
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
 
+        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
+            return original_reward
+
         previous_ratio = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
         current_ratio = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
         ratio_reward = current_ratio - previous_ratio
