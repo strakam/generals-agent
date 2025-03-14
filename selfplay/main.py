@@ -25,8 +25,8 @@ class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
     n_envs: int = 128
-    n_steps: int = 3000
-    batch_size: int = 600
+    n_steps: int = 6000
+    batch_size: int = 1500
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
@@ -120,11 +120,10 @@ class SelfPlayTrainer:
 
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.network.reset()
-
-        # Setup the fixed network as opponent
         self.fixed_network = self.fabric.setup(self.fixed_network)
-        self.fixed_network.eval()  # Set fixed network to evaluation mode
+
+        self.network.reset()
+        self.fixed_network.reset()
 
         # Create environment.
         self.agent_names = ["1", "2"]
