@@ -4,7 +4,6 @@ import torch
 from dataclasses import dataclass, field
 from typing import List, Tuple
 import gymnasium as gym
-import neptune
 from lightning.fabric import Fabric
 from tqdm import tqdm
 
@@ -12,10 +11,7 @@ from generals import GridFactory, GymnasiumGenerals
 from network import Network, load_fabric_checkpoint
 from rewards import CompositeRewardFn
 from logger import NeptuneLogger
-from model_utils import (
-    check_and_save_checkpoints,
-    print_parameter_breakdown,
-)
+from model_utils import print_parameter_breakdown
 
 torch.set_float32_matmul_precision("medium")
 
@@ -24,20 +20,16 @@ torch.set_float32_matmul_precision("medium")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 256
-    n_steps: int = 3000
-    batch_size: int = 1500
+    n_envs: int = 224
+    n_steps: int = 2800
+    batch_size: int = 700
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
     checkpoint_path: str = "today4.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
     checkpoint_dir: str = "/root/"
-
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45, 0.47])
-    update_fixed_network_threshold: float = 0.47
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -45,14 +37,14 @@ class SelfPlayConfig:
     learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.003  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "bf16-mixed"
+    precision: str = "32-true"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -113,6 +105,8 @@ class SelfPlayTrainer:
             self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
+
+        self.opponents = [self.fixed_network]
 
         # Print detailed parameter breakdown
         if self.fabric.is_global_zero:
@@ -305,11 +299,17 @@ class SelfPlayTrainer:
         next_obs, mask, _ = self.process_observations(next_obs, infos)
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
 
+        import random
+        self.opponent = self.fixed_network
         for iteration in range(1, self.cfg.training_iterations + 1):
-            print()
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
-            for step in range(0, self.cfg.n_steps):
+            for step in range(self.cfg.n_steps):
+                if step % 2000 == 0:
+                    # Sample a random opponent from self.opponents every 2000 steps
+                    self.opponent = self.opponents[random.randint(0, len(self.opponents) - 1)]
+                    self.opponent.eval()  # Ensure the opponent is in evaluation mode
+
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
@@ -329,7 +329,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed network) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _ = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions, _ = self.opponent.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -399,31 +399,6 @@ class SelfPlayTrainer:
                 draw_rate = draws / total_games
                 loss_rate = losses / total_games
                 avg_game_length = avg_game_length / total_games  # Calculate average game length
-
-                # Check if we should save a checkpoint based on win rate thresholds
-                newly_saved_thresholds = check_and_save_checkpoints(
-                    self.fabric,
-                    self.network,
-                    self.optimizer,
-                    self.cfg.checkpoint_dir,
-                    self.cfg.store_checkpoint_thresholds,
-                    self.saved_thresholds,
-                    win_rate,
-                    self.self_play_iteration,
-                )
-                self.saved_thresholds.update(newly_saved_thresholds)
-
-                # If win rate exceeds threshold, update fixed network to current network
-                if win_rate >= self.cfg.update_fixed_network_threshold:
-                    self.fabric.print(
-                        f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.update_fixed_network_threshold:.2%}, updating fixed network"
-                    )
-                    self.fixed_network.load_state_dict(self.network.state_dict())
-                    # Reset the fixed network
-                    self.fixed_network.eval()
-                    self.self_play_iteration += 1
-                    self.saved_thresholds.clear()
-
             else:
                 win_rate = draw_rate = loss_rate = avg_game_length = 0.0
 
@@ -473,6 +448,22 @@ class SelfPlayTrainer:
             training_time = time.time() - train_start_time
             minutes, seconds = divmod(training_time, 60)
             print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
+
+            if (iteration+1) % 5 == 0:
+                self.opponents.append(self.network)
+                # Keep only the last 5 opponents
+                if len(self.opponents) > 5:
+                    self.opponents = self.opponents[-5:]
+                # Save the current network checkpoint
+                if self.fabric.is_global_zero:
+                    checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
+                    state = {
+                        "model": self.network,
+                        "optimizer": self.optimizer,
+                    }
+                    self.fabric.save(checkpoint_path, state)
+                    self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
+
 
         self.logger.close()
 
