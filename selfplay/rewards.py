@@ -90,3 +90,12 @@ class CompositeRewardFn(RewardFn):
         city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
 
         return float(original_reward + self.ratio_weight * ratio_reward + self.city_weight * city_reward)
+
+class WinLoseRewardFn(RewardFn):
+    """A reward function that shapes the reward based on the number of cities owned."""
+
+    def __init__(self):
+        pass
+
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        return compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
