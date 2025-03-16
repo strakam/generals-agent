@@ -386,16 +386,16 @@ class Network(L.LightningModule):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        # # Freeze the backbone
-        for param in self.backbone.parameters():
-            param.requires_grad = False
+        # # # Freeze the backbone
+        # for param in self.backbone.parameters():
+        #     param.requires_grad = False
 
-        # Only optimize the heads
-        trainable_params = []
-        trainable_params.extend(self.policy_head.parameters())
-        trainable_params.extend(self.value_head.parameters())
+        # # Only optimize the heads
+        # trainable_params = []
+        # trainable_params.extend(self.policy_head.parameters())
+        # trainable_params.extend(self.value_head.parameters())
 
-        optimizer = torch.optim.AdamW(trainable_params, lr=lr, amsgrad=True, eps=1e-07, weight_decay=0.15)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, eps=1e-07, weight_decay=0.15)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
