@@ -21,6 +21,8 @@ class Network(L.LightningModule):
         compile: bool = False,
         history_size: int = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        use_lstm: bool = False,
+        lstm_hidden_size: int = 256,
     ):
         super().__init__()
         self.lr = lr
@@ -28,8 +30,17 @@ class Network(L.LightningModule):
         self.history_size = history_size
         self.batch_size = batch_size
         self.n_channels = 23 + 2 * self.history_size
+        self.use_lstm = use_lstm
+        self.lstm_hidden_size = lstm_hidden_size
 
-        self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
+        self.backbone = Pyramid(
+            self.n_channels, 
+            repeats, 
+            channel_sequence, 
+            use_lstm=use_lstm, 
+            lstm_hidden_size=lstm_hidden_size,
+            batch_size=batch_size
+        )
         final_channels = channel_sequence[0]
 
         self.value_head = nn.Sequential(
@@ -73,6 +84,10 @@ class Network(L.LightningModule):
         self.register_buffer("enemy_seen", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("last_enemy_army_seen_value", torch.zeros(shape, device=device))
         self.register_buffer("last_enemy_army_seen_timestep", torch.zeros(shape, device=device))
+
+        # Reset LSTM states if used
+        if self.use_lstm:
+            self.backbone.reset_lstm_states()
 
     def reset_histories(self, obs: torch.Tensor):
         # When timestep of the observation is 0, we want to reset all data corresponding to given batch sample
@@ -426,8 +441,15 @@ class Pyramid(nn.Module):
         input_channels: int = 55,
         stage_blocks: list[int] = [2, 2, 2],
         stage_channels: list[int] = [256, 320, 384],
+        use_lstm: bool = False,
+        lstm_hidden_size: int = 256,
+        batch_size: int = 1,
     ):
         super().__init__()
+        self.use_lstm = use_lstm
+        self.lstm_hidden_size = lstm_hidden_size
+        self.batch_size = batch_size
+        
         # First convolution to adjust input channels
         first_channels = 256 if stage_channels == [] else stage_channels[0]
         self.first_conv = nn.Sequential(
@@ -453,6 +475,30 @@ class Pyramid(nn.Module):
                 skip_channels.append(channels)
             self.encoder_stages.append(stage)
 
+        # LSTM at the bottleneck - only if use_lstm is True
+        if self.use_lstm:
+            last_channel = stage_channels[-1] if stage_channels else first_channels
+            # Calculate spatial dimensions at bottleneck
+            bottleneck_h = 24 // (2 ** (len(stage_blocks) - 1)) if len(stage_blocks) > 0 else 24
+            bottleneck_w = bottleneck_h
+            
+            # LSTM for processing spatial features
+            self.lstm = nn.LSTM(
+                input_size=last_channel * bottleneck_h * bottleneck_w,
+                hidden_size=self.lstm_hidden_size,
+                batch_first=True,
+                num_layers=1,
+            )
+            
+            # Projection back to spatial features
+            self.lstm_proj = nn.Linear(
+                self.lstm_hidden_size, 
+                last_channel * bottleneck_h * bottleneck_w
+            )
+            
+            # Initialize LSTM states
+            self.reset_lstm_states()
+
         # Decoder stages
         self.decoder_stages = nn.ModuleList()
 
@@ -467,6 +513,11 @@ class Pyramid(nn.Module):
                 stage.append(DeconvResBlock(channels, channels, skip_channels.pop(), stride=2))
             self.decoder_stages.append(stage)
 
+    def reset_lstm_states(self):
+        if self.use_lstm:
+            self.hidden_state = None
+            self.cell_state = None
+
     def forward(self, x):
         skip_connections = []
         x = self.first_conv(x)
@@ -474,6 +525,27 @@ class Pyramid(nn.Module):
             for block in stage:
                 skip_out, x = block(x)
                 skip_connections.append(skip_out)
+                
+        # LSTM at bottleneck
+        if self.use_lstm:
+            batch_size = x.shape[0]
+            # Reshape spatial features to sequential data
+            lstm_in = x.reshape(batch_size, 1, -1)  # (batch, seq_len=1, features)
+            
+            # Process through LSTM
+            if self.hidden_state is None or self.cell_state is None or batch_size != self.hidden_state.shape[1]:
+                # Initialize states if not available or batch size changed
+                lstm_out, (self.hidden_state, self.cell_state) = self.lstm(lstm_in)
+            else:
+                # Use existing states
+                lstm_out, (self.hidden_state, self.cell_state) = self.lstm(
+                    lstm_in, (self.hidden_state, self.cell_state)
+                )
+            
+            # Project back to spatial features
+            lstm_out = self.lstm_proj(lstm_out.reshape(batch_size, -1))
+            x = lstm_out.reshape(x.shape)
+
         for stage in self.decoder_stages:
             for block in stage:
                 skip_in = skip_connections.pop()

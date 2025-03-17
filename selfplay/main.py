@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
 from network import Network, load_fabric_checkpoint
-from rewards import WinLoseRewardFn, ExplicitCityRewardFn
+from rewards import WinLoseRewardFn, ExplicitCityRewardFn, CompositeRewardFn
 from logger import NeptuneLogger
 from model_utils import (
     check_and_save_checkpoints,
@@ -31,7 +31,7 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "today4.ckpt"
+    checkpoint_path: str = ""
     checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
     checkpoint_dir: str = "/root/"
 
@@ -56,6 +56,10 @@ class SelfPlayConfig:
     devices: int = 1
     seed: int = 42
 
+    # LSTM parameters
+    use_lstm: bool = True
+    lstm_hidden_size: int = 256
+
 
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     # Create environments with different min_generals_distance values
@@ -70,7 +74,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=ExplicitCityRewardFn(),
+                reward_fn=CompositeRewardFn(),
             )
         )
 
@@ -109,8 +113,20 @@ class SelfPlayTrainer:
             self.fixed_network.eval()  # Set fixed network to evaluation mode
         else:
             seq = cfg.channel_sequence
-            self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
-            self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
+            self.network = Network(
+                batch_size=cfg.n_envs, 
+                channel_sequence=seq, 
+                repeats=cfg.repeats,
+                use_lstm=cfg.use_lstm,
+                lstm_hidden_size=cfg.lstm_hidden_size
+            )
+            self.fixed_network = Network(
+                batch_size=cfg.n_envs, 
+                channel_sequence=seq, 
+                repeats=cfg.repeats,
+                use_lstm=cfg.use_lstm,
+                lstm_hidden_size=cfg.lstm_hidden_size
+            )
             self.fixed_network.eval()
 
         # Print detailed parameter breakdown
@@ -316,6 +332,12 @@ class SelfPlayTrainer:
             print()
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
+
+            # Reset LSTM states at the beginning of each iteration if using LSTM
+            if self.cfg.use_lstm:
+                self.network.backbone.reset_lstm_states()
+                self.fixed_network.backbone.reset_lstm_states()
+
             for step in range(0, self.cfg.n_steps):
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
