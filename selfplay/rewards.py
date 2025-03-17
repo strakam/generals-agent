@@ -99,3 +99,17 @@ class WinLoseRewardFn(RewardFn):
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         return compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+
+class ExplicitCityRewardFn(RewardFn):
+    """A reward function that shapes the reward based on the number of cities owned."""
+
+    def __init__(self):
+        self.decay_rate = 0.997
+        self.city_weight = 0.25
+    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
+        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
+        city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
+        timestep = obs.timestep
+        return float(original_reward + self.city_weight * city_reward * (self.decay_rate ** timestep))
+    
+        

@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
 from network import Network, load_fabric_checkpoint
-from rewards import CompositeRewardFn, WinLoseRewardFn
+from rewards import WinLoseRewardFn, ExplicitCityRewardFn
 from logger import NeptuneLogger
 from model_utils import (
     check_and_save_checkpoints,
@@ -25,13 +25,13 @@ class SelfPlayConfig:
     training_iterations: int = 1000
     n_envs: int = 256
     n_steps: int = 3000
-    batch_size: int = 1500
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "today6.ckpt"
+    checkpoint_path: str = "today4.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
     checkpoint_dir: str = "/root/"
 
@@ -44,7 +44,7 @@ class SelfPlayConfig:
     learning_rate: float = 2.5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.004  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
@@ -70,7 +70,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn(),
+                reward_fn=ExplicitCityRewardFn(),
             )
         )
 
@@ -258,11 +258,11 @@ class SelfPlayTrainer:
 
         if self.fabric.is_global_zero:
             if np.mean(average_entropy) > 1.65:
-                self.cfg.entropy_coef -= 0.001
-                self.fabric.print(f"Decreasing entropy coef to {self.cfg.entropy_coef}")
+                self.cfg.ent_coef -= 0.001
+                self.fabric.print(f"Decreasing entropy coef to {self.cfg.ent_coef}")
             if np.mean(average_entropy) < 1.3:
-                self.cfg.entropy_coef += 0.001
-                self.fabric.print(f"Increasing entropy coef to {self.cfg.entropy_coef}")
+                self.cfg.ent_coef += 0.001
+                self.fabric.print(f"Increasing entropy coef to {self.cfg.ent_coef}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
