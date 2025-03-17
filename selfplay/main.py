@@ -31,20 +31,20 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "today4.ckpt"
+    checkpoint_path: str = "today6.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/cas/"
     checkpoint_dir: str = "/root/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45, 0.47])
-    update_fixed_network_threshold: float = 0.47
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.43, 0.45])
+    update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 1e-5  # Standard PPO learning rate
+    learning_rate: float = 2.5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.003  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
@@ -185,7 +185,7 @@ class SelfPlayTrainer:
             batch_size=effective_batch_size,
             drop_last=False,
         )
-
+        average_entropy = []
         for epoch in range(1, self.cfg.n_epochs + 1):
             # Set epoch for distributed sampler
             if fabric.world_size > 1:
@@ -202,7 +202,7 @@ class SelfPlayTrainer:
                 loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(
                     batch, self.cfg
                 )
-
+                average_entropy.append(entropy_loss.mean().item())
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
                     logratio = torch.log(ratio)
@@ -255,6 +255,14 @@ class SelfPlayTrainer:
 
             if approx_kl > self.cfg.target_kl:
                 break
+
+        if self.fabric.is_global_zero:
+            if np.mean(average_entropy) > 1.65:
+                self.cfg.entropy_coef -= 0.001
+                self.fabric.print(f"Decreasing entropy coef to {self.cfg.entropy_coef}")
+            if np.mean(average_entropy) < 1.3:
+                self.cfg.entropy_coef += 0.001
+                self.fabric.print(f"Increasing entropy coef to {self.cfg.entropy_coef}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
