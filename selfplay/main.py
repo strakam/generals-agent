@@ -20,15 +20,15 @@ torch.set_float32_matmul_precision("medium")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 40
-    n_steps: int = 6000
-    batch_size: int = 1000
+    n_envs: int = 60
+    n_steps: int = 8000
+    batch_size: int = 800
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_79.ckpt"
+    checkpoint_path: str = "today.ckpt"
     checkpoint_dir: str = "/root/"
 
     # PPO parameters
@@ -38,7 +38,7 @@ class SelfPlayConfig:
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.3  # Value function coefficient
+    today: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
@@ -107,13 +107,14 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_27", "cp_79", "today5", "today6", "castly", "castly2", "anti"]
+        opponent_names = ["today"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
-        # Set all opponents to evaluation mode
-        for opponent in self.opponents:
-            opponent.eval()
+        # Set up opponents with Fabric and set to evaluation mode
+        for i in range(len(self.opponents)):
+            self.opponents[i] = self.fabric.setup(self.opponents[i])
+            self.opponents[i].eval()
 
         # Print detailed parameter breakdown
         if self.fabric.is_global_zero:
