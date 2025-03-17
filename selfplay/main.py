@@ -38,7 +38,7 @@ class SelfPlayConfig:
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
-    today: float = 0.3  # Value function coefficient
+    vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
