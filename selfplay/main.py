@@ -28,16 +28,16 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "today.ckpt"
+    checkpoint_path: str = "cp_79.ckpt"
     checkpoint_dir: str = "/root/"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 1e-5  # Standard PPO learning rate
+    learning_rate: float = 8e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
@@ -55,13 +55,10 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
     # Create environments with different min_generals_distance values
     envs = []
     for i in range(cfg.n_envs):
-        # Use min_generals_distance=15 for half of the environments, 20 for the rest
-        min_dist = 15 if i < cfg.n_envs // 2 else 20
-        print(f"Creating environment with min_generals_distance={min_dist}")
         envs.append(
-            lambda min_dist=min_dist: GymnasiumGenerals(
+            GymnasiumGenerals(
                 agents=agent_names,
-                grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
+                grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
                 reward_fn=WinLoseRewardFn()
@@ -107,7 +104,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["today"]
+        opponent_names = ["cp_79", "anti", "today6"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
@@ -261,7 +258,7 @@ class SelfPlayTrainer:
 
             if np.mean(entropies) > 1.4:
                 self.cfg.ent_coef -= 0.001
-            else:
+            elif np.mean(entropies) < 0.9:
                 self.cfg.ent_coef += 0.001
             self.cfg.ent_coef = max(0.0, self.cfg.ent_coef)
             self.fabric.print(f"Changing entropy coefficient: {self.cfg.ent_coef}")
