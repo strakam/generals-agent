@@ -17,9 +17,9 @@ class TrainingConfig:
     # Data parameters
     dataset_name: str = "above70"
     n_samples: int = 11_370_000
-    buffer_size: int = 18000
-    batch_size: int = 1920
-    n_workers: int = 32
+    buffer_size: int = 18
+    batch_size: int = 19
+    n_workers: int = 2
     # Training parameters
     learning_rate: float = 2e-4
     n_epochs: int = 16

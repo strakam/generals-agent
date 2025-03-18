@@ -22,10 +22,12 @@ class Network(L.LightningModule):
         final_channels = channel_sequence[0]
 
         self.value_head = nn.Sequential(
+            nn.Dropout(0.25),
             Pyramid(final_channels, [], []),
             nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten(),
+            nn.LayerNorm(h * w),
             nn.Linear(h * w, 1),
         )
 
