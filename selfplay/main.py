@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
 from network import Network, load_fabric_checkpoint
-from rewards import CompositeRewardFn
+from rewards import CompositeRewardFn, WinLoseRewardFn
 from logger import NeptuneLogger
 from model_utils import print_parameter_breakdown
 
@@ -64,7 +64,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio", min_generals_distance=min_dist),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=CompositeRewardFn(),
+                reward_fn=WinLoseRewardFn()
             )
         )
 

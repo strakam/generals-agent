@@ -26,6 +26,7 @@ class SelfPlayConfig:
     accelerator: str
     precision: str
     devices: int
+    neptune_token_path: str = "neptune_token.txt"
 
 
 class NeptuneLogger:
@@ -33,14 +34,21 @@ class NeptuneLogger:
 
     def __init__(self, config: SelfPlayConfig, fabric: Fabric):
         self.fabric = fabric
+        self.config = config
+        
         # Only initialize Neptune on the main process
         if self.fabric.is_global_zero:
+            # Load Neptune API key from file
+            with open(self.config.neptune_token_path, "r") as f:
+                neptune_key = f.read().strip()
+                
             self.run = neptune.init_run(
                 project="strakam/selfplay",
                 name="generals-selfplay",
                 tags=["selfplay", "training"],
+                api_token=neptune_key,
             )
-        self.config = config
+        
         self._log_config()
 
     def _log_config(self):
