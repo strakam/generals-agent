@@ -88,7 +88,7 @@ class SelfPlayTrainer:
         self.agents = {}
         agent_paths = [f"checkpoints/experiments/{name}.ckpt" for name in agent_names]
         for name in agent_names:
-            agent = load_fabric_checkpoint(agent_paths[names.index(name)], batch_size=self.cfg.n_envs, eval_mode=True)
+            agent = load_fabric_checkpoint(agent_paths[agent_names.index(name)], batch_size=self.cfg.n_envs, eval_mode=True)
             agent = self.fabric.setup(agent)
             self.agents[name] = agent
 
@@ -153,7 +153,7 @@ class SelfPlayTrainer:
 
         wins, draws, losses, avg_game_length = 0, 0, 0, 0
         step = 0
-        n_games = 500
+        n_games = 250
 
         # Continue collecting data until we have enough completed games
         while (wins + losses) < n_games:
@@ -161,7 +161,7 @@ class SelfPlayTrainer:
                 # Get actions for player 1 (learning player)
                 player1_obs = next_obs[:, 0]
                 player1_mask = mask[:, 0]
-                player1_actions, _ = self.predict(player1_obs, player1_mask)
+                player1_actions, _ = self.ag1.predict(player1_obs, player1_mask)
                 _actions[:, 0] = player1_actions.cpu().numpy()
 
                 # Get actions for player 2 (fixed network) without storing
@@ -213,7 +213,7 @@ class SelfPlayTrainer:
 
 
 def main():
-    agent_names = ["anti", "castler1", "castler2", "zero0", "zero1", "zero2", "zero3", "cp_79"]
+    agent_names = ["anti", "castler2", "zero0", "zero1", "zero2", "zero3", "cp_79"]
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg, agent_names)
 
