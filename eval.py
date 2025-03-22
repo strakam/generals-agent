@@ -16,7 +16,7 @@ torch.set_float32_matmul_precision("medium")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 2
+    n_envs: int = 256
     n_steps: int = 3
     n_epochs: int = 4
     batch_size: int = 6
@@ -45,14 +45,14 @@ class SelfPlayConfig:
     seed: int = 42
 
 
-def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
+def create_environment(cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
     # Create environments with different min_generals_distance values
     envs = []
     for i in range(cfg.n_envs):
         # Use min_generals_distance=15 for all environments
         envs.append(
             lambda: GymnasiumGenerals(
-                agents=agent_names,
+                agents=["1", "2"],
                 grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
@@ -88,13 +88,12 @@ class SelfPlayTrainer:
         self.agents = {}
         agent_paths = [f"checkpoints/experiments/{name}.ckpt" for name in agent_names]
         for name in agent_names:
-            agent = load_fabric_checkpoint(agent_paths[agent_names.index(name)], batch_size=self.cfg.n_envs, eval_mode=True)
+            agent = load_fabric_checkpoint(agent_paths[names.index(name)], batch_size=self.cfg.n_envs, eval_mode=True)
             agent = self.fabric.setup(agent)
             self.agents[name] = agent
 
         # Create environment.
-        self.agent_names = agent_names
-        self.envs = create_environment(self.agent_names, cfg)
+        self.envs = create_environment(cfg)
 
         # Setup expected tensor shapes for rollouts.
         self.n_agents = 2
@@ -116,15 +115,15 @@ class SelfPlayTrainer:
             # Create augmented observations for both players
             augmented_obs = torch.stack(
                 [
-                    self.agents[self.agent_names[0]].augment_observation(obs[:, 0, ...]),
-                    self.agents[self.agent_names[1]].augment_observation(obs[:, 1, ...]),
+                    self.ag1.augment_observation(obs[:, 0, ...]),
+                    self.ag2.augment_observation(obs[:, 1, ...]),
                 ],
                 dim=1,
             )
 
             # Process masks.
             _masks = torch.zeros((self.cfg.n_envs, self.n_agents, 24, 24, 4), device=self.fabric.device)
-            for i, agent_name in enumerate(self.agent_names):
+            for i, agent_name in enumerate(["1", "2"]):
                 masks = torch.from_numpy(infos[agent_name]["masks"])
                 masks = masks.to(self.fabric.device, non_blocking=True)
                 _masks[:, i] = masks
@@ -132,7 +131,7 @@ class SelfPlayTrainer:
             rewards = torch.stack(
                 [
                     torch.from_numpy(infos[agent_name]["reward"]).to(self.fabric.device, non_blocking=True)
-                    for agent_name in self.agent_names
+                    for agent_name in ["1", "2"]
                 ],
                 dim=1,
             ).reshape(self.cfg.n_envs, self.n_agents)
@@ -142,11 +141,10 @@ class SelfPlayTrainer:
     def run(self, agent1, agent2):
         """Runs the main training loop."""
         # Pre-allocate action arrays to avoid repeated numpy allocations
-        ag1 = self.agents[agent1]
-        ag2 = self.agents[agent2]
-        ag1.reset()
-        ag2.reset()
-        self.agent_names = [agent1, agent2]
+        self.ag1 = self.agents[agent1]
+        self.ag2 = self.agents[agent2]
+        self.ag1.reset()
+        self.ag2.reset()
         _actions = np.empty((self.cfg.n_envs, 2, 5), dtype=np.int32)
 
         next_obs, infos = self.envs.reset()
@@ -163,13 +161,13 @@ class SelfPlayTrainer:
                 # Get actions for player 1 (learning player)
                 player1_obs = next_obs[:, 0]
                 player1_mask = mask[:, 0]
-                player1_actions, player1_value, player1_logprobs, _ = ag1(player1_obs, player1_mask)
+                player1_actions, player1_value, player1_logprobs, _ = self.ag1(player1_obs, player1_mask)
                 _actions[:, 0] = player1_actions.cpu().numpy()
 
                 # Get actions for player 2 (fixed network) without storing
                 player2_obs = next_obs[:, 1]
                 player2_mask = mask[:, 1]
-                player2_actions, _ = ag2.predict(player2_obs, player2_mask)
+                player2_actions, _ = self.ag2.predict(player2_obs, player2_mask)
                 _actions[:, 1] = player2_actions.cpu().numpy()
 
             next_obs, _, terminations, truncations, infos = self.envs.step(_actions)
@@ -178,8 +176,8 @@ class SelfPlayTrainer:
             # Track game outcomes when episodes finish
             if any(dones):
                 game_times = prev_obs[:, 0, 13, 0, 0]  # Get game times from observations
-                p1_wins = infos[self.agent_names[0]]["winner"]
-                p2_wins = infos[self.agent_names[1]]["winner"]
+                p1_wins = infos["1"]["winner"]
+                p2_wins = infos["2"]["winner"]
                 wins += np.sum(dones & p1_wins)
                 losses += np.sum(dones & p2_wins)
                 draws += np.sum(dones & ~p1_wins & ~p2_wins)
@@ -188,8 +186,6 @@ class SelfPlayTrainer:
 
             next_obs, mask, _ = self.process_observations(next_obs, infos)
             step += 1
-            print(f"Step {step} ", end="")
-        print() 
 
         # Calculate win/draw/loss percentages
         total_games = wins + draws + losses
@@ -198,7 +194,6 @@ class SelfPlayTrainer:
         loss_rate = losses / total_games
 
         self.fabric.print(
-            f"Player 1: Wins = {win_rate:.2%}, Draws = {draw_rate:.2%}, Losses = {loss_rate:.2%}; "
             f"Avg Game Length = {avg_game_length:.1f}; "
             f"Total games: {total_games}; "
             f"Self-play iteration: {self.self_play_iteration}"
@@ -214,14 +209,12 @@ class SelfPlayTrainer:
                 "self_play_iteration": self.self_play_iteration,
             }
         )
-        self.logger.close()
-
         return win_rate, draw_rate, loss_rate
 
 
 def main():
+    agent_names = ["anti", "castler1", "castler2", "zero0", "zero1", "zero2", "zero3", "cp_79"]
     cfg = SelfPlayConfig()
-    agent_names = ["zero3", "anti"]
     trainer = SelfPlayTrainer(cfg, agent_names)
 
 
@@ -244,6 +237,9 @@ def main():
 
     # Create heatmap
     plt.figure(figsize=(8, 6))
+    mask = np.eye(n_agents, dtype=bool)  # Create mask for diagonal entries
+    
+    # First create the main heatmap without diagonal
     sns.heatmap(
         winrate_matrix,
         annot=True,
@@ -253,8 +249,20 @@ def main():
         vmax=1,
         xticklabels=agent_names,
         yticklabels=agent_names,
-        cbar_kws={'label': 'Win Rate'}
+        cbar_kws={'label': 'Win Rate'},
+        mask=mask  # Mask out diagonal entries
     )
+    
+    # Add black diagonal entries
+    sns.heatmap(
+        np.eye(n_agents),
+        cmap=['black'],
+        cbar=False,
+        xticklabels=agent_names,
+        yticklabels=agent_names,
+        mask=~mask  # Inverse mask to only show diagonal
+    )
+    
     plt.title('Win Rate Matrix')
     plt.tight_layout()
     plt.savefig('winrate_matrix.png')
