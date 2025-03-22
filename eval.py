@@ -161,7 +161,7 @@ class SelfPlayTrainer:
                 # Get actions for player 1 (learning player)
                 player1_obs = next_obs[:, 0]
                 player1_mask = mask[:, 0]
-                player1_actions, player1_value, player1_logprobs, _ = self.ag1(player1_obs, player1_mask)
+                player1_actions, _ = self.predict(player1_obs, player1_mask)
                 _actions[:, 0] = player1_actions.cpu().numpy()
 
                 # Get actions for player 2 (fixed network) without storing
