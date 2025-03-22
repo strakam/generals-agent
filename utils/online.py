@@ -44,7 +44,7 @@ def main():
     args = parse_arguments()
 
     # checkpoint_path = "checkpoints/sup114/step=52000.ckpt"
-    checkpoint_path = "checkpoints/experiments/cp_79.ckpt"
+    checkpoint_path = "checkpoints/experiments/zero3.ckpt"
     # checkpoint_path = "checkpoints/sup335/step=50000.ckpt"
     agent = load_online_agent(checkpoint_path)
 
