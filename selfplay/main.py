@@ -13,7 +13,7 @@ from rewards import CompositeRewardFn, WinLoseRewardFn
 from logger import NeptuneLogger
 from model_utils import print_parameter_breakdown
 
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")
 
 
 @dataclass
@@ -45,7 +45,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "32-true"
+    precision: str = "bf16-mixed"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -261,6 +261,7 @@ class SelfPlayTrainer:
             elif np.mean(entropies) < 0.9:
                 self.cfg.ent_coef += 0.001
             self.cfg.ent_coef = max(0.0, self.cfg.ent_coef)
+            self.cfg.ent_coef = min(self.cfg.ent_coef, 0.003)
             self.fabric.print(f"Changing entropy coefficient: {self.cfg.ent_coef}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
