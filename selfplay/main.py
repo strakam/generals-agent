@@ -20,7 +20,7 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 60
+    n_envs: int = 90
     n_steps: int = 8000
     batch_size: int = 800
     n_epochs: int = 4
@@ -28,8 +28,9 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_79.ckpt"
-    checkpoint_dir: str = "/root/"
+    checkpoint_path: str = "cp_19.ckpt"
+    checkpoint_dir: str = "/root/zero4"
+    neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
@@ -42,6 +43,7 @@ class SelfPlayConfig:
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
+    checkpoint_save_interval: int = 5
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -56,7 +58,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
     envs = []
     for i in range(cfg.n_envs):
         envs.append(
-            GymnasiumGenerals(
+            lambda: GymnasiumGenerals(
                 agents=agent_names,
                 grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
@@ -104,7 +106,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_79", "anti", "today6"]
+        opponent_names = ["cp_9", "cp_19", "cp_29", "cp_49", "cp_63"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
@@ -318,7 +320,7 @@ class SelfPlayTrainer:
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
             for step in range(self.cfg.n_steps):
-                if step % 750 == 0:
+                if step % 1000 == 0:
                     # Sample a random opponent from self.opponents every 2000 steps
                     self.opponent = self.opponents[random.randint(0, len(self.opponents) - 1)]
 
@@ -461,10 +463,7 @@ class SelfPlayTrainer:
             minutes, seconds = divmod(training_time, 60)
             print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
 
-            if (iteration+1) % self.cfg.checkpoint_addition_interval == 0:
-                self.opponents.append(self.network)
-                self.opponents[-1].eval()
-                # Save the current network checkpoint
+            if (iteration+1) % self.cfg.checkpoint_save_interval == 0:
                 if self.fabric.is_global_zero:
                     checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
                     state = {
@@ -473,6 +472,11 @@ class SelfPlayTrainer:
                     }
                     self.fabric.save(checkpoint_path, state)
                     self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
+
+            if (iteration+1) % self.cfg.checkpoint_addition_interval == 0:
+                self.opponents.append(self.network)
+                self.opponents[-1].eval()
+                # Save the current network checkpoint
 
 
         self.logger.close()
