@@ -218,6 +218,23 @@ class Network(L.LightningModule):
 
         return direction_mask
 
+    def augment_representation(self, obs):
+        # Apply random rotation (0, 90, 180, or 270 degrees)
+        if torch.rand(1).item() > 0.5:
+            k = torch.randint(0, 4, (1,)).item()  # Random rotation 0-3 times (90 degrees each)
+            obs = torch.rot90(obs, k, dims=[2, 3])
+            
+        # Apply random horizontal flip
+        if torch.rand(1).item() > 0.5:
+            obs = torch.flip(obs, dims=[3])
+            
+        # Apply random vertical flip
+        if torch.rand(1).item() > 0.5:
+            obs = torch.flip(obs, dims=[2])
+            
+        return obs
+
+
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
         mask = self.prepare_masks(mask.float())
@@ -226,7 +243,9 @@ class Network(L.LightningModule):
         with torch.no_grad():
             representation = self.backbone(obs)
 
-        value = self.value_head(representation).flatten()
+        representation_for_value = self.augment_representation(representation)
+
+        value = self.value_head(representation_for_value).flatten()
         action_logits = self.policy_head(representation) + mask
 
         # Prepare flattened logits for categorical distribution
@@ -386,16 +405,16 @@ class Network(L.LightningModule):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        # # # Freeze the backbone
-        # for param in self.backbone.parameters():
-        #     param.requires_grad = False
+        # # Freeze the backbone
+        for param in self.backbone.parameters():
+            param.requires_grad = False
 
-        # # Only optimize the heads
-        # trainable_params = []
-        # trainable_params.extend(self.policy_head.parameters())
-        # trainable_params.extend(self.value_head.parameters())
+        # Only optimize the heads
+        trainable_params = []
+        trainable_params.extend(self.policy_head.parameters())
+        trainable_params.extend(self.value_head.parameters())
 
-        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, eps=1e-07, weight_decay=0.15)
+        optimizer = torch.optim.AdamW(trainable_params, lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.1, betas=(0.9, 0.999))
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 

@@ -28,19 +28,19 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_19.ckpt"
-    checkpoint_dir: str = "/root/zero4"
+    checkpoint_path: str = "cp_4.ckpt"
+    checkpoint_dir: str = "/root/zero4/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 8e-6  # Standard PPO learning rate
+    learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.3  # Value function coefficient
-    target_kl: float = 0.02  # Target KL divergence
+    vf_coef: float = 0.5  # Value function coefficient
+    target_kl: float = 0.025  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
     checkpoint_save_interval: int = 5
@@ -106,7 +106,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_9", "cp_19", "cp_29", "cp_49", "cp_63"]
+        opponent_names = ["cp_9", "cp_19", "cp_29", "cp_63"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]

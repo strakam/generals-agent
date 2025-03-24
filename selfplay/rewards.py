@@ -73,6 +73,9 @@ class WinLoseRewardFn(RewardFn):
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
 
+        if prior_action[4] == 1:
+            original_reward += 0.0015 # Encourage splitting a bit
+
         return float(original_reward)
 
 
@@ -80,8 +83,8 @@ class CompositeRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of cities owned."""
 
     def __init__(self):
-        self.city_weight = 0.12
-        self.ratio_weight = 0.1
+        self.city_weight = 0.18
+        self.ratio_weight = 0.15
         self.maximum_ratio = 1.5
 
     def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
@@ -102,10 +105,10 @@ class CompositeRewardFn(RewardFn):
         city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
 
         if prior_action[4] == 1:
-            original_reward += 0.001 # Encourage splitting a bit
+            original_reward += 0.0015 # Encourage splitting a bit
         
         if obs.timestep > 700:
-            original_reward -= 0.001 # Penalize for taking too long
+            original_reward -= 0.0015 # Penalize for taking too long
 
 
         return float(original_reward + self.ratio_weight * ratio_reward + self.city_weight * city_reward)
