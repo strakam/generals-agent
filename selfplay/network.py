@@ -251,6 +251,14 @@ class Network(L.LightningModule):
         # Prepare flattened logits for categorical distribution
         action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
         combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
+        # Apply temperature scaling to logits before creating distribution
+        # Lower temperature makes distribution more peaked, higher makes it more uniform
+        temperature = 0.85  # Default temperature value, can be adjusted as needed
+        if hasattr(self, 'temperature'):
+            temperature = self.temperature
+
+        # Scale logits by inverse temperature
+        combined_logits = combined_logits / temperature
         action_dist = torch.distributions.Categorical(logits=combined_logits)
         
         if action is None:

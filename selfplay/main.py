@@ -20,15 +20,15 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 90
-    n_steps: int = 8000
-    batch_size: int = 800
+    n_envs: int = 60
+    n_steps: int = 5000
+    batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_4.ckpt"
+    checkpoint_path: str = "zero3.ckpt"
     checkpoint_dir: str = "/root/zero4/"
     neptune_token_path: str = "neptune_token.txt"
 
@@ -63,7 +63,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=WinLoseRewardFn()
+                reward_fn=CompositeRewardFn()
             )
         )
 
@@ -106,7 +106,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_9", "cp_19", "cp_29", "cp_63"]
+        opponent_names = ["cp_9", "cp_19", "zero3"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
