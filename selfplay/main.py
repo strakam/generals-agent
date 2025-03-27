@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from generals import GridFactory, GymnasiumGenerals
 from network import Network, load_fabric_checkpoint
-from rewards import CompositeRewardFn, WinLoseRewardFn
+from rewards import CompositeRewardFn
 from logger import NeptuneLogger
 from model_utils import print_parameter_breakdown
 
@@ -29,7 +29,7 @@ class SelfPlayConfig:
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
     checkpoint_path: str = "zero3.ckpt"
-    checkpoint_dir: str = "/root/zero4/"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/back/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
@@ -41,9 +41,10 @@ class SelfPlayConfig:
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
+    opponent_temperature: float = 0.5
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
-    checkpoint_save_interval: int = 5
+    checkpoint_save_interval: int = 4
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -106,13 +107,14 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_9", "cp_19", "zero3"]
+        opponent_names = ["zero3"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
         # Set up opponents with Fabric and set to evaluation mode
         for i in range(len(self.opponents)):
             self.opponents[i] = self.fabric.setup(self.opponents[i])
+            self.opponents[i].temperature = self.cfg.opponent_temperature
             self.opponents[i].eval()
 
         # Print detailed parameter breakdown
@@ -423,6 +425,21 @@ class SelfPlayTrainer:
                 f"Total games: {total_games}; "
                 f"Self-play iteration: {self.self_play_iteration}"
             )
+            if iteration % self.cfg.checkpoint_save_interval == 0:
+                if self.fabric.is_global_zero:
+                    checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
+                    state = {
+                        "model": self.network,
+                        "optimizer": self.optimizer,
+                    }
+                    self.fabric.save(checkpoint_path, state)
+                    self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
+
+            if win_rate > 0.44:
+                self.opponents.append(self.network)
+                self.opponents[-1].eval()
+                self.opponents[-1].temperature = self.cfg.opponent_temperature
+                # Save the current network checkpoint
 
             self.logger.log_metrics(
                 {
@@ -462,22 +479,6 @@ class SelfPlayTrainer:
             training_time = time.time() - train_start_time
             minutes, seconds = divmod(training_time, 60)
             print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
-
-            if (iteration+1) % self.cfg.checkpoint_save_interval == 0:
-                if self.fabric.is_global_zero:
-                    checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
-                    state = {
-                        "model": self.network,
-                        "optimizer": self.optimizer,
-                    }
-                    self.fabric.save(checkpoint_path, state)
-                    self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
-
-            if (iteration+1) % self.cfg.checkpoint_addition_interval == 0:
-                self.opponents.append(self.network)
-                self.opponents[-1].eval()
-                # Save the current network checkpoint
-
 
         self.logger.close()
 

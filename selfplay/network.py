@@ -21,12 +21,14 @@ class Network(L.LightningModule):
         compile: bool = False,
         history_size: int = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        temperature: float = 1.0,
     ):
         super().__init__()
         self.lr = lr
         self.n_steps = n_steps
         self.history_size = history_size
         self.batch_size = batch_size
+        self.temperature = temperature
         self.n_channels = 23 + 2 * self.history_size
 
         self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
@@ -253,12 +255,9 @@ class Network(L.LightningModule):
         combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
         # Apply temperature scaling to logits before creating distribution
         # Lower temperature makes distribution more peaked, higher makes it more uniform
-        temperature = 0.85  # Default temperature value, can be adjusted as needed
-        if hasattr(self, 'temperature'):
-            temperature = self.temperature
 
         # Scale logits by inverse temperature
-        combined_logits = combined_logits / temperature
+        combined_logits = combined_logits / self.temperature
         action_dist = torch.distributions.Categorical(logits=combined_logits)
         
         if action is None:
