@@ -225,17 +225,16 @@ class Network(L.LightningModule):
         if torch.rand(1).item() > 0.5:
             k = torch.randint(0, 4, (1,)).item()  # Random rotation 0-3 times (90 degrees each)
             obs = torch.rot90(obs, k, dims=[2, 3])
-            
+
         # Apply random horizontal flip
         if torch.rand(1).item() > 0.5:
             obs = torch.flip(obs, dims=[3])
-            
+
         # Apply random vertical flip
         if torch.rand(1).item() > 0.5:
             obs = torch.flip(obs, dims=[2])
-            
-        return obs
 
+        return obs
 
     def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
@@ -254,49 +253,50 @@ class Network(L.LightningModule):
         action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
         combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
         # Apply temperature scaling to logits before creating distribution
-        # Lower temperature makes distribution more peaked, higher makes it more uniform
-
         # Scale logits by inverse temperature
         combined_logits = combined_logits / self.temperature
         action_dist = torch.distributions.Categorical(logits=combined_logits)
-        
+
         if action is None:
             # Sample action
             combined_idx = action_dist.sample()
-            
+
             # Convert combined index to action components
             direction = combined_idx // (24 * 24)
             position = combined_idx % (24 * 24)
             i, j = position // 24, position % 24
-            
+
             # Determine action type
             is_half_army = (direction >= 4) & (direction < 8)
             is_pass = direction == 8
-            
+
             # Create standardized action format
-            final_direction = torch.where(is_pass, 
-                                         torch.full_like(direction, 8), 
-                                         torch.where(is_half_army, direction - 4, direction))
-            
+            final_direction = torch.where(
+                is_pass, torch.full_like(direction, 8), torch.where(is_half_army, direction - 4, direction)
+            )
+
             # Create action tensor: [is_pass, i, j, direction, is_half_army]
-            action = torch.stack([
-                is_pass.float(),  # Directly use is_pass instead of zeros + update
-                i.float(), 
-                j.float(), 
-                final_direction.float(), 
-                is_half_army.float()
-            ], dim=1)
+            action = torch.stack(
+                [
+                    is_pass.float(),  # Directly use is_pass instead of zeros + update
+                    i.float(),
+                    j.float(),
+                    final_direction.float(),
+                    is_half_army.float(),
+                ],
+                dim=1,
+            )
         else:
             # Calculate combined index from existing action
             target_i, target_j = action[:, 1], action[:, 2]
             target_direction, is_half_army = action[:, 3], action[:, 4]
-            
-            adjusted_direction = torch.where(target_direction < 4,
-                                            target_direction + 4 * is_half_army,
-                                            torch.full_like(target_direction, 8))
-            
+
+            adjusted_direction = torch.where(
+                target_direction < 4, target_direction + 4 * is_half_army, torch.full_like(target_direction, 8)
+            )
+
             combined_idx = adjusted_direction * 24 * 24 + target_i * 24 + target_j
-        
+
         # Calculate log probability and entropy
         logprob = action_dist.log_prob(combined_idx)
         entropy = action_dist.entropy()
@@ -407,7 +407,6 @@ class Network(L.LightningModule):
 
         return action, value
 
-
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
@@ -421,7 +420,9 @@ class Network(L.LightningModule):
         trainable_params.extend(self.policy_head.parameters())
         trainable_params.extend(self.value_head.parameters())
 
-        optimizer = torch.optim.AdamW(trainable_params, lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.1, betas=(0.9, 0.999))
+        optimizer = torch.optim.AdamW(
+            trainable_params, lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.1, betas=(0.9, 0.999)
+        )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
