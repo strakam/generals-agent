@@ -64,7 +64,7 @@ def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vecto
                 grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=CompositeRewardFn()
+                reward_fn=CompositeRewardFn(),
             )
         )
 
@@ -317,6 +317,7 @@ class SelfPlayTrainer:
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
 
         import random
+
         self.opponent = self.fixed_network
         for iteration in range(1, self.cfg.training_iterations + 1):
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
@@ -345,7 +346,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed network) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _ = self.opponent.predict(player2_obs, player2_mask)
+                    player2_actions, _, _, _ = self.opponent(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
