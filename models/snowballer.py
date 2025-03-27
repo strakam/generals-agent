@@ -403,7 +403,7 @@ class Network(L.LightningModule):
         return action.cpu().numpy().astype(int)[0]
 
     @staticmethod
-    def load_from_checkpoint(checkpoint_path: str = "models/snowballer.ckpt", batch_size: int = 1, eval_mode: bool = True) -> "Network":
+    def load_from_checkpoint(checkpoint_path: str = "models/aggresive.ckpt", batch_size: int = 1, eval_mode: bool = True) -> "Network":
         """Load a network from a Fabric-style checkpoint file.
         
         Args:
