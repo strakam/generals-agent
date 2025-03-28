@@ -20,16 +20,16 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 60
-    n_steps: int = 5000
+    n_envs: int = 128
+    n_steps: int = 3000
     batch_size: int = 600
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "zero3.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/back/"
+    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
@@ -38,10 +38,10 @@ class SelfPlayConfig:
     learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
-    opponent_temperature: float = 0.5
+    opponent_temperature: float = 1.0
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
     checkpoint_save_interval: int = 4
@@ -107,7 +107,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["zero3"]
+        opponent_names = ["supervised_M"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
@@ -346,7 +346,7 @@ class SelfPlayTrainer:
                     # Get actions for player 2 (fixed network) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _, _, _ = self.opponent(player2_obs, player2_mask)
+                    player2_actions, _ = self.opponent.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
@@ -440,6 +440,7 @@ class SelfPlayTrainer:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
+                self.opponents = self.opponents[-5:]
                 # Save the current network checkpoint
 
             self.logger.log_metrics(

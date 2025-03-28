@@ -74,7 +74,7 @@ class WinLoseRewardFn(RewardFn):
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
 
         if prior_action[4] == 1:
-            original_reward += 0.0015 # Encourage splitting a bit
+            original_reward += 0.0015  # Encourage splitting a bit
 
         return float(original_reward)
 
@@ -83,13 +83,14 @@ class CompositeRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of cities owned."""
 
     def __init__(self):
-        self.city_weight = 0.3
-        self.ratio_weight = 0.25
-        self.maximum_ratio = 1.5
+        self.city_weight = 0.6
+        self.ratio_weight = 0.5
+        self.maximum_army_ratio = 1.5
+        self.maximum_land_ratio = 1.5
 
-    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
-        ratio = my_army / opponent_army
-        ratio = np.log(ratio) / np.log(self.maximum_ratio)
+    def calculate_ratio_reward(self, mine: int, opponents: int, max_ratio: float) -> float:
+        ratio = mine / opponents
+        ratio = np.log(ratio) / np.log(max_ratio)
         return np.minimum(np.maximum(ratio, -1.0), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
@@ -98,17 +99,30 @@ class CompositeRewardFn(RewardFn):
         if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
             return original_reward
 
-        previous_ratio = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
-        current_ratio = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
-        ratio_reward = current_ratio - previous_ratio
+        previous_army_ratio = self.calculate_ratio_reward(
+            prior_obs.owned_army_count, prior_obs.opponent_army_count, self.maximum_army_ratio
+        )
+        current_army_ratio = self.calculate_ratio_reward(
+            obs.owned_army_count, obs.opponent_army_count, self.maximum_army_ratio
+        )
+        army_reward = current_army_ratio - previous_army_ratio
+
+        previous_land_ratio = self.calculate_ratio_reward(
+            prior_obs.owned_land_count, prior_obs.opponent_land_count, self.maximum_land_ratio
+        )
+        current_land_ratio = self.calculate_ratio_reward(
+            obs.owned_land_count, obs.opponent_land_count, self.maximum_land_ratio
+        )
+        land_reward = current_land_ratio - previous_land_ratio
 
         city_reward = compute_num_cities_owned(obs) - compute_num_cities_owned(prior_obs)
 
         if prior_action[4] == 1:
-            original_reward += 0.0015 # Encourage splitting a bit
-        
-        if obs.timestep > 700:
-            original_reward -= 0.0015 # Penalize for taking too long
+            original_reward += 0.0015  # Encourage splitting a bit
 
-
-        return float(original_reward + self.ratio_weight * ratio_reward + self.city_weight * city_reward)
+        return float(
+            original_reward
+            + self.ratio_weight * army_reward
+            + self.city_weight * city_reward
+            + self.ratio_weight * land_reward
+        )
