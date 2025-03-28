@@ -30,6 +30,7 @@ class SelfPlayConfig:
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
     checkpoint_path: str = "supervised_M.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
+    #checkpoint_dir: str = "/root/reward/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
@@ -318,12 +319,14 @@ class SelfPlayTrainer:
 
         import random
 
+        self.last_update_iteration = -1
+
         self.opponent = self.fixed_network
         for iteration in range(1, self.cfg.training_iterations + 1):
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
             for step in range(self.cfg.n_steps):
-                if step % 1000 == 0:
+                if step % 600 == 0:
                     # Sample a random opponent from self.opponents every 2000 steps
                     self.opponent = self.opponents[random.randint(0, len(self.opponents) - 1)]
 
@@ -436,11 +439,13 @@ class SelfPlayTrainer:
                     self.fabric.save(checkpoint_path, state)
                     self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
 
-            if win_rate > 0.44:
+            if win_rate > 0.44 and iteration - self.last_update_iteration > 3:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
                 self.opponents = self.opponents[-5:]
+                self.last_update_iteration = iteration
+                self.fabric.print(f"New opponent added in iteration {iteration}")
                 # Save the current network checkpoint
 
             self.logger.log_metrics(
