@@ -213,7 +213,7 @@ class Network(L.LightningModule):
         # The last channel is for PASS
         full_mask = mask[:, :4, :, :]  # First 4 channels (UP, DOWN, LEFT, RIGHT)
         half_mask = mask[:, :4, :, :]  # Duplicate for half-army moves
-        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
+        zero_layer = torch.ones(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
 
         direction_mask = torch.cat((full_mask, half_mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
