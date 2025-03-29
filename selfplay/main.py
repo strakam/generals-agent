@@ -20,15 +20,15 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 256
-    n_steps: int = 1500
+    n_envs: int = 128
+    n_steps: int = 3000
     batch_size: int = 500
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "zero3.ckpt"
+    checkpoint_path: str = "supervised_M.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
     #checkpoint_dir: str = "/root/reward/"
     neptune_token_path: str = "neptune_token.txt"
@@ -36,7 +36,7 @@ class SelfPlayConfig:
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 1e-5  # Standard PPO learning rate
+    learning_rate: float = 1.5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
