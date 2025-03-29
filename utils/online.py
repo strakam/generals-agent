@@ -9,7 +9,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Generals.io Agent Configuration")
     parser.add_argument("--lobby", default=None, type=str, help="Replay ID for private lobby")
     parser.add_argument("--public", default=False, action="store_true", help="Flag to join a public lobby")
-    parser.add_argument("--user_id", default="trLflJK8s45a", type=str, help="User ID for the agent")
+    parser.add_argument("--user_id", default="zerooo3", type=str, help="User ID for the agent")
     return parser.parse_args()
 
 def join_game_loop(client, agent, lobby_id):
@@ -44,7 +44,7 @@ def main():
     args = parse_arguments()
 
     # checkpoint_path = "checkpoints/sup114/step=52000.ckpt"
-    checkpoint_path = "checkpoints/experiments/zero3.ckpt"
+    checkpoint_path = "checkpoints/experiments/rew/cp_12.ckpt"
     # checkpoint_path = "checkpoints/sup335/step=50000.ckpt"
     agent = load_online_agent(checkpoint_path)
 

@@ -224,7 +224,7 @@ class NeuroAgent(Agent):
 
         with torch.no_grad():
             # action, logprob, _, value = self.network(self.last_observation, mask)
-            action, value = self.network.predict(self.last_observation, mask)
+            action, value = self.network.predict(self.last_observation, mask, postprocess=True)
 
         # Sample from distributions instead of using argmax
         return action.cpu().numpy().astype(int), value.cpu().numpy().astype(float)
@@ -255,16 +255,25 @@ class OnlineAgent(NeuroAgent):
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         super().__init__(network, id, history_size, 1, device)
+        self.last_move = None
 
     def act(self, obs: Observation) -> Action:
         """
         Based on a new observation, augment the internal state and return an action.
         """
         obs.pad_observation(24)
+        original_obs = obs
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action, value = super().act(obs, mask)
-        return action[0]
+        action = action[0]
+        print(action, original_obs.armies[action[1], action[2]])
+        if self.last_move is not None:
+            # Compare elementwise if current action is the same as last move
+            if np.array_equal(action, self.last_move):
+                print("Agent is repeating the same move!")
+        self.last_move = action
+        return action
 
     def precompile(self):
         """

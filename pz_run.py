@@ -34,23 +34,23 @@ class ShapedRewardFn(RewardFn):
 
 # agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
 # agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
-agent1 = load_fabric_checkpoint("checkpoints/experiments/masked.ckpt", mode="online")
-agent2 = load_fabric_checkpoint("checkpoints/experiments/cp_2_threshold_45.ckpt", mode="online")
+agent1 = load_fabric_checkpoint("checkpoints/experiments/zero3.ckpt", mode="online")
+agent2 = load_fabric_checkpoint("checkpoints/experiments/rew/cp_12.ckpt", mode="online")
 # agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
 
-agent_names = ["masked", "2"]
+agent_names = ["zero3", "rew"]
 agents = {agent_names[0]: agent1, agent_names[1]: agent2}
 
 # Create environment
-n_games = 50
+n_games = 250
 gf = GridFactory(mode="generalsio")
 wins = {agent: 0 for agent in agent_names}
 for g in range(n_games):
     done = False
     for agent in agents.values():
         agent.reset()
-    env = PettingZooGenerals(agents=agent_names, grid_factory=gf, render_mode="human", reward_fn=ShapedRewardFn())
-    observations, info = env.reset()
+    env = PettingZooGenerals(agents=agent_names, grid_factory=gf, render_mode="human")
+    observations, info = env.reset(options={"replay_file": "hehe"})
     agent1.reset()
     agent2.reset()
     while not done:
