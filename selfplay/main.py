@@ -28,7 +28,7 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "supervised_M.ckpt"
+    checkpoint_path: str = "zero3.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
     #checkpoint_dir: str = "/root/reward/"
     neptune_token_path: str = "neptune_token.txt"
@@ -108,7 +108,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["supervised_M"]
+        opponent_names = ["zero3", "cp_9", "cp_19"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
