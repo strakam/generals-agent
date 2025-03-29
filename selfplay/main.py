@@ -20,9 +20,9 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 128
-    n_steps: int = 3000
-    batch_size: int = 600
+    n_envs: int = 256
+    n_steps: int = 1500
+    batch_size: int = 500
     n_epochs: int = 4
     truncation: int = 2000
     grid_size: int = 23
@@ -39,7 +39,7 @@ class SelfPlayConfig:
     learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
     opponent_temperature: float = 1.0
@@ -108,7 +108,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["zero3", "cp_9", "cp_19"]
+        opponent_names = ["zero3"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
@@ -326,7 +326,7 @@ class SelfPlayTrainer:
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
             for step in range(self.cfg.n_steps):
-                if step % 600 == 0:
+                if step % 500 == 0:
                     # Sample a random opponent from self.opponents every 2000 steps
                     self.opponent = self.opponents[random.randint(0, len(self.opponents) - 1)]
 
@@ -429,7 +429,7 @@ class SelfPlayTrainer:
                 f"Total games: {total_games}; "
                 f"Self-play iteration: {self.self_play_iteration}"
             )
-            if iteration % self.cfg.checkpoint_save_interval == 0:
+            if iteration % self.cfg.checkpoint_save_interval == 0 or win_rate > 0.43:
                 if self.fabric.is_global_zero:
                     checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
                     state = {
@@ -443,7 +443,7 @@ class SelfPlayTrainer:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
-                self.opponents = self.opponents[-5:]
+                self.opponents = self.opponents[-3:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")
                 # Save the current network checkpoint
