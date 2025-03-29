@@ -262,16 +262,10 @@ class OnlineAgent(NeuroAgent):
         Based on a new observation, augment the internal state and return an action.
         """
         obs.pad_observation(24)
-        original_obs = obs
         mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
         obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
         action, value = super().act(obs, mask)
         action = action[0]
-        print(action, original_obs.armies[action[1], action[2]])
-        if self.last_move is not None:
-            # Compare elementwise if current action is the same as last move
-            if np.array_equal(action, self.last_move):
-                print("Agent is repeating the same move!")
         self.last_move = action
         return action
 

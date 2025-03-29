@@ -399,6 +399,7 @@ class Network(L.LightningModule):
         """
         # Get unnormalized army counts from the first channel of observation (first element only)
         army_counts = obs[0, 0, :, :]
+        foreign_army_counts = torch.max(obs[0, 3, :, :], obs[0, 2, :, :])
         
         # Prepare mask and get logits (use only first element)
         processed_obs = self.normalize_observations(obs.clone())
@@ -457,7 +458,7 @@ class Network(L.LightningModule):
                 dest_i, dest_j = i + di, j + dj
                 
                 # Get destination army count
-                dest_count = army_counts[dest_i, dest_j].item()
+                dest_count = foreign_army_counts[dest_i, dest_j].item()
                 
                 # Only accept if source has at least 2 more armies than destination
                 if source_count - dest_count >= 2:
@@ -476,7 +477,6 @@ class Network(L.LightningModule):
         
         # If no valid action found, just use the top action
         if not valid_action_found:
-            print("no valid action found")
             idx = topk_indices[0].item()
             adjusted_direction = idx // (24 * 24)
             position = idx % (24 * 24)
