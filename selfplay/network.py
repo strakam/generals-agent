@@ -341,11 +341,10 @@ class Network(L.LightningModule):
         square_mask, direction_mask = self.prepare_masks(obs, mask.float())
 
         # Use no_grad for backbone computation since it's frozen
-        representation = self.backbone(obs)
+        with torch.no_grad():
+            representation = self.backbone(obs)
 
-        representation_for_value = self.augment_representation(representation)
-
-        value = self.value_head(representation_for_value).flatten()
+        value = self.value_head(representation).flatten()
 
         # Get square logits and apply mask
         square_logits_unmasked = self.square_head(representation)
