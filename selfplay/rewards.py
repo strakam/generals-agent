@@ -121,7 +121,7 @@ class CompositeRewardFn(RewardFn):
             original_reward += 0.0015  # Encourage splitting a bit
 
         return float(
-            original_reward
+            1.5 * original_reward
             + self.ratio_weight * army_reward
             + self.city_weight * city_reward
             + self.ratio_weight * land_reward

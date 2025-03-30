@@ -28,18 +28,18 @@ class SelfPlayConfig:
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "supervised_M.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
-    #checkpoint_dir: str = "/root/reward/"
+    checkpoint_path: str = "zero3.ckpt"
+    # checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
+    checkpoint_dir: str = "/root/ft/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.95  # GAE lambda parameter
+    gae_lambda: float = 0.90  # GAE lambda parameter
     learning_rate: float = 1.5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
+    ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
     vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
     opponent_temperature: float = 1.0
@@ -429,7 +429,7 @@ class SelfPlayTrainer:
                 f"Total games: {total_games}; "
                 f"Self-play iteration: {self.self_play_iteration}"
             )
-            if iteration % self.cfg.checkpoint_save_interval == 0 or win_rate > 0.43:
+            if iteration % self.cfg.checkpoint_save_interval == 0 or win_rate > 0.44:
                 if self.fabric.is_global_zero:
                     checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
                     state = {
@@ -439,11 +439,11 @@ class SelfPlayTrainer:
                     self.fabric.save(checkpoint_path, state)
                     self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
 
-            if win_rate > 0.44 and iteration - self.last_update_iteration > 3:
+            if win_rate > 0.45 and iteration - self.last_update_iteration > 3:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
-                self.opponents = self.opponents[-3:]
+                self.opponents = self.opponents[-2:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")
                 # Save the current network checkpoint
