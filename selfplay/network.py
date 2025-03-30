@@ -319,6 +319,22 @@ class Network(L.LightningModule):
 
         return loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs
 
+    def augment_representation(self, obs):
+        # Apply random rotation (0, 90, 180, or 270 degrees)
+        if torch.rand(1).item() > 0.5:
+            k = torch.randint(0, 4, (1,)).item()  # Random rotation 0-3 times (90 degrees each)
+            obs = torch.rot90(obs, k, dims=[2, 3])
+
+        # Apply random horizontal flip
+        if torch.rand(1).item() > 0.5:
+            obs = torch.flip(obs, dims=[3])
+
+        # Apply random vertical flip
+        if torch.rand(1).item() > 0.5:
+            obs = torch.flip(obs, dims=[2])
+
+        return obs
+
     @torch.compile(dynamic=False, fullgraph=True)
     def predict(self, obs, mask):
         obs = self.normalize_observations(obs.float())
@@ -327,7 +343,9 @@ class Network(L.LightningModule):
         # Use no_grad for backbone computation since it's frozen
         representation = self.backbone(obs)
 
-        value = self.value_head(representation).flatten()
+        representation_for_value = self.augment_representation(representation)
+
+        value = self.value_head(representation_for_value).flatten()
 
         # Get square logits and apply mask
         square_logits_unmasked = self.square_head(representation)
