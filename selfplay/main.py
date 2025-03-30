@@ -14,11 +14,7 @@ from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
-from model_utils import (
-    save_checkpoint, 
-    check_and_save_checkpoints,
-    print_parameter_breakdown
-)
+from model_utils import check_and_save_checkpoints, print_parameter_breakdown
 
 torch.set_float32_matmul_precision("medium")
 
@@ -26,14 +22,14 @@ torch.set_float32_matmul_precision("medium")
 class ShapedRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of generals owned."""
 
-    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.75):
+    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
         self.maximum_ratio = clip_value
         self.shaping_weight = shaping_weight
 
-    def calculate_ratio_reward(self, my_army: int, opponent_army: int) -> float:
-        ratio = my_army / opponent_army
-        ratio = np.log(ratio) / np.log(self.maximum_ratio)
-        return np.minimum(np.maximum(ratio, -0.25), 1.0)
+    def calculate_ratio_reward(self, my_count: int, opponent_count: int, max_ratio: float = 1.5) -> float:
+        ratio = my_count / opponent_count
+        ratio = np.log(ratio) / np.log(max_ratio)
+        return np.minimum(np.maximum(ratio, -1.0), 1.0)
 
     def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
         original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
@@ -44,41 +40,52 @@ class ShapedRewardFn(RewardFn):
         prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
 
-        return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+        ratio_reward = current_ratio_reward - prev_ratio_reward
+
+        prev_land_ratio_reward = self.calculate_ratio_reward(
+            prior_obs.owned_land_count, prior_obs.opponent_land_count, max_ratio=1.25
+        )
+        current_land_ratio_reward = self.calculate_ratio_reward(
+            obs.owned_land_count, obs.opponent_land_count, max_ratio=1.25
+        )
+
+        land_ratio_reward = current_land_ratio_reward - prev_land_ratio_reward
+
+        return float(original_reward + self.shaping_weight * (ratio_reward + land_ratio_reward))
 
 
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 500
-    n_steps: int = 800
-    batch_size: int = 500
-    n_epochs: int = 3
+    n_envs: int = 128
+    n_steps: int = 7000
+    batch_size: int = 700
+    n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "snowballer.ckpt"
+    checkpoint_path: str = "aggressive.ckpt"
     checkpoint_dir: str = "/storage/praha1/home/strakam3/baller2/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45, 0.46, 0.47])
-    update_fixed_network_threshold: float = 0.47
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45])
+    update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.9  # GAE lambda parameter
+    gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 6e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.005  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.3  # Value function coefficient
+    ent_coef: float = 0.001  # Increased from 0.00 to encourage exploration
+    vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.02  # Target KL divergence
     norm_adv: bool = True  # Whether to normalize advantages
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "32-true"
+    precision: str = "bf16-mixed"
     accelerator: str = "auto"
     devices: int = 1
     seed: int = 42
@@ -186,7 +193,7 @@ class SelfPlayTrainer:
             self.network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
-        
+
         # Print detailed parameter breakdown
         if self.fabric.is_global_zero:
             print_parameter_breakdown(self.network)
@@ -474,14 +481,14 @@ class SelfPlayTrainer:
 
                 # Check if we should save a checkpoint based on win rate thresholds
                 newly_saved_thresholds = check_and_save_checkpoints(
-                    self.fabric, 
-                    self.network, 
+                    self.fabric,
+                    self.network,
                     self.optimizer,
                     self.cfg.checkpoint_dir,
                     self.cfg.store_checkpoint_thresholds,
                     self.saved_thresholds,
                     win_rate,
-                    iteration
+                    iteration,
                 )
                 self.saved_thresholds.update(newly_saved_thresholds)
 
