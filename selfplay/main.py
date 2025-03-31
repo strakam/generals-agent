@@ -58,24 +58,24 @@ class ShapedRewardFn(RewardFn):
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 128
-    n_steps: int = 7000
-    batch_size: int = 700
+    n_envs: int = 352
+    n_steps: int = 2600
+    batch_size: int = 880
     n_epochs: int = 4
     truncation: int = 1000
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "aggressive.ckpt"
-    checkpoint_dir: str = "/storage/praha1/home/strakam3/baller2/"
+    checkpoint_path: str = "aggro45.ckpt"
+    checkpoint_dir: str = "/root/aggro/"
 
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.45])
+    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.43, 0.44, 0.45])
     update_fixed_network_threshold: float = 0.45
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 6e-6  # Standard PPO learning rate
+    gae_lambda: float = 0.92  # GAE lambda parameter
+    learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.2  # PPO clipping coefficient
     ent_coef: float = 0.001  # Increased from 0.00 to encourage exploration
@@ -87,7 +87,7 @@ class SelfPlayConfig:
     strategy: str = "auto"
     precision: str = "bf16-mixed"
     accelerator: str = "auto"
-    devices: int = 1
+    devices: int = 2
     seed: int = 42
 
 
@@ -186,7 +186,7 @@ class SelfPlayTrainer:
         if cfg.checkpoint_path != "":
             self.network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
             # Load the fixed network from the same checkpoint
-            self.fixed_network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
+            self.fixed_network = load_fabric_checkpoint("aggressive.ckpt", cfg.n_envs)
             self.fixed_network.eval()  # Set fixed network to evaluation mode
         else:
             seq = cfg.channel_sequence
@@ -201,6 +201,8 @@ class SelfPlayTrainer:
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
         self.fixed_network = self.fabric.setup(self.fixed_network)
+
+        self.fixed_network.mark_forward_method("predict")
 
         self.network.reset()
         self.fixed_network.reset()
