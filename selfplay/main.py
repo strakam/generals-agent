@@ -51,7 +51,7 @@ class SelfPlayConfig:
     strategy: str = "auto"
     precision: str = "bf16-mixed"
     accelerator: str = "auto"
-    devices: int = 1
+    devices: int = 2
     seed: int = 42
 
 
@@ -125,6 +125,8 @@ class SelfPlayTrainer:
         self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
         self.fixed_network = self.fabric.setup(self.fixed_network)
+
+        self.fixed_network.mark_forward_method("predict")
 
         self.network.reset()
         self.fixed_network.reset()
@@ -258,13 +260,10 @@ class SelfPlayTrainer:
                     }
                 )
 
-            if approx_kl > self.cfg.target_kl:
-                break
-
             if np.mean(entropies) > 1.4:
-                self.cfg.ent_coef -= 0.001
+                self.cfg.ent_coef = 0.001
             elif np.mean(entropies) < 0.9:
-                self.cfg.ent_coef += 0.001
+                self.cfg.ent_coef = 0.002
             self.cfg.ent_coef = max(0.0, self.cfg.ent_coef)
             self.cfg.ent_coef = min(self.cfg.ent_coef, 0.003)
             self.fabric.print(f"Changing entropy coefficient: {self.cfg.ent_coef}")
@@ -444,6 +443,7 @@ class SelfPlayTrainer:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
+                self.opponents[-1].mark_forward_method("predict")
                 self.opponents = self.opponents[-2:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")
