@@ -169,7 +169,7 @@ class Network(L.LightningModule):
                 obs[:, structures_in_fog, :, :],
                 obs[:, timestep, :, :] * ones,
                 (obs[:, timestep, :, :] % 50) * ones / 50,
-                obs[:, priority, :, :] * ones,
+                obs[:, priority, :, :] * ones * 0, # priority no longer exists
                 obs[:, owned_land_count, :, :] * ones,
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
@@ -179,7 +179,7 @@ class Network(L.LightningModule):
             ],
             dim=1,
         )
-        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
+        army_stacks = torch.cat([self.army_stack * 0, self.enemy_stack], dim=1) # remove my stack - dont condition on previous moves
         augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
         return augmented_obs
 
@@ -213,7 +213,7 @@ class Network(L.LightningModule):
         # The last channel is for PASS
         full_mask = mask[:, :4, :, :]  # First 4 channels (UP, DOWN, LEFT, RIGHT)
         half_mask = mask[:, :4, :, :]  # Duplicate for half-army moves
-        zero_layer = torch.ones(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
+        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
 
         direction_mask = torch.cat((full_mask, half_mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
