@@ -20,28 +20,29 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 528
+    n_envs: int = 396
     n_steps: int = 3000
-    batch_size: int = 750
-    n_epochs: int = 4
-    truncation: int = 1000
+    batch_size: int = 1500
+    n_epochs: int = 3
+    truncation: int = 740
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_21.ckpt"
+    checkpoint_path: str = "cp_31.ckpt"
     # checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
-    checkpoint_dir: str = "/root/ft/"
+    checkpoint_dir: str = "/root/ft2/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.90  # GAE lambda parameter
-    learning_rate: float = 3.5e-5  # Standard PPO learning rate
+    learning_rate: float = 7e-6  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.1  # PPO clipping coefficient
-    ent_coef: float = 0.002  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.3  # Value function coefficient
+    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
+    vf_coef: float = 0.5  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
+    temperature: float = 1.0  # Temperature for softmax action selection
     opponent_temperature: float = 1.0
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
@@ -51,7 +52,7 @@ class SelfPlayConfig:
     strategy: str = "auto"
     precision: str = "bf16-mixed"
     accelerator: str = "auto"
-    devices: int = 2
+    devices: int = 1
     seed: int = 42
 
 
@@ -126,7 +127,6 @@ class SelfPlayTrainer:
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
         self.fixed_network = self.fabric.setup(self.fixed_network)
 
-        self.fixed_network.mark_forward_method("predict")
 
         self.network.reset()
         self.fixed_network.reset()
@@ -260,13 +260,13 @@ class SelfPlayTrainer:
                     }
                 )
 
-            if np.mean(entropies) > 1.4:
-                self.cfg.ent_coef = 0.001
+            if np.mean(entropies) > 1.2:
+                self.cfg.ent_coef = 0.000
             elif np.mean(entropies) < 0.9:
-                self.cfg.ent_coef = 0.002
-            self.cfg.ent_coef = max(0.0, self.cfg.ent_coef)
-            self.cfg.ent_coef = min(self.cfg.ent_coef, 0.003)
-            self.fabric.print(f"Changing entropy coefficient: {self.cfg.ent_coef}")
+                self.cfg.ent_coef = 0.001
+
+        self.cfg.temperature = max(0.8, self.cfg.temperature - 0.04)
+        self.fabric.print(f"New temperature: {self.cfg.temperature}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
@@ -339,7 +339,7 @@ class SelfPlayTrainer:
                     # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
-                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask)
+                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask, args=self.cfg)
                     _actions[:, 0] = player1_actions.cpu().numpy()
 
                     # Store player 1's actions, values, and logprobs
@@ -439,11 +439,10 @@ class SelfPlayTrainer:
                 self.fabric.save(checkpoint_path, state)
                 self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
 
-            if win_rate > 0.47 and iteration - self.last_update_iteration > 3:
+            if win_rate > 0.54 and iteration - self.last_update_iteration > 3:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
-                self.opponents[-1].mark_forward_method("predict")
                 self.opponents = self.opponents[-2:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")

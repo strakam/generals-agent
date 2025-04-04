@@ -83,10 +83,10 @@ class CompositeRewardFn(RewardFn):
     """A reward function that shapes the reward based on the number of cities owned."""
 
     def __init__(self):
-        self.city_weight = 0.7
-        self.ratio_weight = 0.5
-        self.maximum_army_ratio = 1.5
-        self.maximum_land_ratio = 1.25
+        self.city_weight = 0.32
+        self.ratio_weight = 0.3
+        self.maximum_army_ratio = 1.75
+        self.maximum_land_ratio = 1.4
 
     def calculate_ratio_reward(self, mine: int, opponents: int, max_ratio: float) -> float:
         ratio = mine / opponents

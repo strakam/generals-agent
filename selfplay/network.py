@@ -236,13 +236,12 @@ class Network(L.LightningModule):
 
         return obs
 
-    def forward(self, obs, mask, action=None):
+    def forward(self, obs, mask, action=None, args=None):
         obs = self.normalize_observations(obs.float())
         mask = self.prepare_masks(mask.float())
 
         # Use no_grad for backbone computation since it's frozen
-        with torch.no_grad():
-            representation = self.backbone(obs)
+        representation = self.backbone(obs)
 
         representation_for_value = self.augment_representation(representation)
 
@@ -254,7 +253,8 @@ class Network(L.LightningModule):
         combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
         # Apply temperature scaling to logits before creating distribution
         # Scale logits by inverse temperature
-        combined_logits = combined_logits / self.temperature
+        temperature = args.temperature if args else self.temperature
+        combined_logits = combined_logits / temperature
         action_dist = torch.distributions.Categorical(logits=combined_logits)
 
         if action is None:
@@ -349,7 +349,7 @@ class Network(L.LightningModule):
         valid_mask = valid_mask * (1 - num_owned_generals)
 
         # Compute network outputs
-        _, newvalues, newlogprobs, entropy = self(obs, masks, actions)
+        _, newvalues, newlogprobs, entropy = self(obs, masks, actions, args)
 
         # Zero out the loss components of invalid samples so they have no effect.
         advantages = advantages * valid_mask
@@ -412,16 +412,16 @@ class Network(L.LightningModule):
         n_steps = n_steps or self.n_steps
 
         # # Freeze the backbone
-        for param in self.backbone.parameters():
-            param.requires_grad = False
+        #for param in self.backbone.parameters():
+        #    param.requires_grad = False
 
-        # Only optimize the heads
-        trainable_params = []
-        trainable_params.extend(self.policy_head.parameters())
-        trainable_params.extend(self.value_head.parameters())
+        ## Only optimize the heads
+        #trainable_params = []
+        #trainable_params.extend(self.policy_head.parameters())
+        #trainable_params.extend(self.value_head.parameters())
 
         optimizer = torch.optim.AdamW(
-            trainable_params, lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.1, betas=(0.9, 0.999)
+            self.parameters(), lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.01, betas=(0.95, 0.999)
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
