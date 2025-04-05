@@ -24,23 +24,23 @@ class SelfPlayConfig:
     n_steps: int = 3000
     batch_size: int = 1500
     n_epochs: int = 3
-    truncation: int = 740
+    truncation: int = 800
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "cp_31.ckpt"
+    checkpoint_path: str = "special.ckpt"
     # checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
-    checkpoint_dir: str = "/root/ft2/"
+    checkpoint_dir: str = "/root/ft_special/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
-    gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.90  # GAE lambda parameter
-    learning_rate: float = 7e-6  # Standard PPO learning rate
+    gamma: float = 0.992  # Discount factor
+    gae_lambda: float = 0.95  # GAE lambda parameter
+    learning_rate: float = 2e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.1  # PPO clipping coefficient
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.5  # Value function coefficient
+    vf_coef: float = 0.05  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
     temperature: float = 1.0  # Temperature for softmax action selection
     opponent_temperature: float = 1.0
@@ -109,7 +109,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_21"]
+        opponent_names = ["cp_30", "cp_10"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
