@@ -501,6 +501,19 @@ class Network(L.LightningModule):
         
         return action, value
 
+    def pure_forward(self, obs, mask):
+        obs = self.normalize_observations(obs)
+        mask = self.prepare_masks(mask)
+
+        # Use no_grad for backbone computation since it's frozen
+        with torch.no_grad():
+            representation = self.backbone(obs)
+
+        value = self.value_head(representation).flatten()
+        action_logits = self.policy_head(representation) + mask
+
+        return action_logits, value
+
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps

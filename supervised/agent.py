@@ -245,6 +245,73 @@ class SupervisedAgent(NeuroAgent):
         self.augment_observation(obs)
         return [1, 0, 0, 0, 0]  # pass
 
+class EnsembleAgent(NeuroAgent):
+    def __init__(
+        self,
+        networks: list[L.LightningModule] | None = None,
+        id: str = "Neuro",
+        history_size: int | None = DEFAULT_HISTORY_SIZE,
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    ):
+        super().__init__(networks[0], id, history_size, 1, device)
+        for network in networks:
+            network.to(device)
+        self.network = networks
+        self.last_move = None
+
+    def act(self, obs: Observation) -> Action:
+        obs.pad_observation(24)
+        mask = torch.from_numpy(compute_valid_move_mask(obs)).unsqueeze(0)
+        obs = torch.tensor(obs.as_tensor()).unsqueeze(0)
+        augmented_obs = self.augment_observation(obs)
+        logits = []
+        for network in self.network:
+            _logits, value = network.pure_forward(augmented_obs, mask)
+            logits.append(_logits)
+        direction = torch.stack(logits).squeeze(1)
+        direction_flat = direction.view(direction.shape[0], 9, -1)
+
+        # Agent 1: Pick top 10 actions by logits size
+        agent1_logits = direction_flat[0].reshape(-1)
+        top10_indices = torch.topk(agent1_logits, 3).indices
+
+        # Agent 2: Pick the max action, but only over top 10 actions suggested by Agent 1
+        agent2_logits = direction_flat[1].reshape(-1)
+        top10_agent2_logits = torch.index_select(agent2_logits, 0, top10_indices)
+        max_index_in_top10 = torch.argmax(top10_agent2_logits)
+        max_index_agent2 = top10_indices[max_index_in_top10]
+
+        # Determine the final action
+        adjusted_direction = max_index_agent2 // (24 * 24)  # Integer division to get direction
+        position = max_index_agent2 % (24 * 24)  # Remainder gives position
+        i, j = position // 24, position % 24
+
+        # Determine if it's a half-army move and the direction
+        is_half_army = (adjusted_direction >= 4) & (adjusted_direction < 8)
+        is_pass = adjusted_direction == 8
+
+        # Convert back to the original direction format (0-3 for directions, 4 for pass)
+        final_direction = torch.where(
+            is_pass,
+            torch.full_like(adjusted_direction, 8),  # Pass is direction 4
+            torch.where(
+                is_half_army,
+                adjusted_direction - 4,  # Half army directions (4-7) -> (0-3)
+                adjusted_direction,  # Full army directions (0-3) stay the same
+            ),
+        )
+
+        # Create action list instead of trying to stack tensors
+        is_pass_value = 1 if is_pass.item() else 0
+        action = [
+            is_pass_value,
+            i.item(),
+            j.item(),
+            final_direction.item(),
+            is_half_army.long().item()
+        ]
+        
+        return action
 
 class OnlineAgent(NeuroAgent):
     def __init__(
@@ -299,39 +366,34 @@ class OnlineAgent(NeuroAgent):
         print("Precompiled the agent")
 
 
-def load_agent(path, batch_size=1, mode="base", eval_mode=True) -> NeuroAgent:
-    """Load a trained agent from a checkpoint file.
-
-    Args:
-        path: Path to the checkpoint file
-        batch_size: Batch size for the agent
-        mode: Type of agent to create ("online", "supervised", or "base")
-        eval_mode: Whether to put the model in evaluation mode
-
-    Returns:
-        NeuroAgent: Loaded agent ready for inference
-    """
+def load_network(path: str, batch_size: int = 1):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    network = torch.load(path, map_location=device)
-    state_dict = network["state_dict"]
+    checkpoint = torch.load(path, map_location=device)
 
-    model = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
-    model_keys = model.state_dict().keys()
-    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_keys}
-    model.load_state_dict(filtered_state_dict)
+    # Create a new network
+    # network = Network(channel_sequence=[192, 224, 256, 256], repeats=[2, 2, 1, 1], compile=True)
+    network = Network(channel_sequence=[256, 256, 288, 288], repeats=[2, 2, 2, 1], compile=True)
 
-    if eval_mode:
-        model.eval()
-    agent_id = path.split("/")[-1].split(".")[0]
+    # Extract the state dict from the checkpoint
+    if isinstance(checkpoint, dict):
+        if "model" in checkpoint:
+            state_dict = checkpoint["model"]
+            if hasattr(state_dict, "state_dict"):
+                state_dict = state_dict.state_dict()
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            raise ValueError(f"Unexpected checkpoint format. Keys found: {checkpoint.keys()}")
+    else:
+        state_dict = checkpoint
 
-    if mode == "online":
-        agent = OnlineAgent(model, id=agent_id, device=device)
-    elif mode == "supervised":
-        agent = SupervisedAgent(model, id=agent_id, batch_size=batch_size, device=device)
-    else:  # "base" or default case
-        agent = NeuroAgent(model, id=agent_id, batch_size=batch_size, device=device)
+    # Filter and load the state dict
+    network_keys = network.state_dict().keys()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in network_keys and k != "direction_loss.weight"}
+    network.load_state_dict(filtered_state_dict)
 
-    return agent
+    network.eval()
+    return network
 
 
 def load_fabric_checkpoint(path: str, batch_size: int = 1, mode: str = "base", eval_mode: bool = True) -> NeuroAgent:
