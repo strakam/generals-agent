@@ -440,11 +440,11 @@ class SelfPlayTrainer:
                 self.fabric.save(checkpoint_path, state)
                 self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
 
-            if win_rate > 0.54 and iteration - self.last_update_iteration > 3:
+            if win_rate > 0.45 and iteration - self.last_update_iteration > 3:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
-                self.opponents = self.opponents[-3:]
+                self.opponents = self.opponents[-4:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")
                 # Save the current network checkpoint
