@@ -20,8 +20,8 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 396
-    n_steps: int = 3000
+    n_envs: int = 198
+    n_steps: int = 6000
     batch_size: int = 1500
     n_epochs: int = 3
     truncation: int = 800
@@ -34,13 +34,13 @@ class SelfPlayConfig:
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
-    gamma: float = 0.992  # Discount factor
+    gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 2e-5  # Standard PPO learning rate
+    learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
-    clip_coef: float = 0.1  # PPO clipping coefficient
+    clip_coef: float = 0.15  # PPO clipping coefficient
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.05  # Value function coefficient
+    vf_coef: float = 0.3  # Value function coefficient
     target_kl: float = 0.025  # Target KL divergence
     temperature: float = 1.0  # Temperature for softmax action selection
     opponent_temperature: float = 1.0
@@ -50,9 +50,9 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "bf16-mixed"
+    precision: str = "32-true"
     accelerator: str = "auto"
-    devices: int = 1
+    devices: int = 2
     seed: int = 42
 
 
@@ -109,7 +109,7 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["cp_30", "cp_10"]
+        opponent_names = ["special", "cp_10", "zero3"]
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
         ]
@@ -117,6 +117,7 @@ class SelfPlayTrainer:
         for i in range(len(self.opponents)):
             self.opponents[i] = self.fabric.setup(self.opponents[i])
             self.opponents[i].temperature = self.cfg.opponent_temperature
+            self.opponents[i].mark_forward_method("predict")
             self.opponents[i].eval()
 
         # Print detailed parameter breakdown
@@ -326,7 +327,7 @@ class SelfPlayTrainer:
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
             start_time = time.time()
             for step in range(self.cfg.n_steps):
-                if step % 1500 == 0:
+                if step % 1000 == 0:
                     # Sample a random opponent from self.opponents every 2000 steps
                     last_opponent = (last_opponent + 1) % len(self.opponents)
                     self.opponent = self.opponents[last_opponent]
@@ -443,7 +444,7 @@ class SelfPlayTrainer:
                 self.opponents.append(self.network)
                 self.opponents[-1].eval()
                 self.opponents[-1].temperature = self.cfg.opponent_temperature
-                self.opponents = self.opponents[-2:]
+                self.opponents = self.opponents[-3:]
                 self.last_update_iteration = iteration
                 self.fabric.print(f"New opponent added in iteration {iteration}")
                 # Save the current network checkpoint
