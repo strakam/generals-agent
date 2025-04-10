@@ -380,6 +380,14 @@ class Network(L.LightningModule):
                 adjusted_direction,  # Full army directions (0-3) stay the same
             ),
         )
+
+        # Create action tensor with shape [batch_size, 5]
+        zeros = torch.zeros_like(i, dtype=torch.float)
+        action = torch.stack([zeros, i, j, final_direction, is_half_army.long()], dim=1)
+        action[action[:, 3] == 8, 0] = 1  # pass action
+
+        return action, value
+
     def augment_representation(self, obs):
         # Apply random rotation (0, 90, 180, or 270 degrees)
         if torch.rand(1).item() > 0.5:
@@ -412,7 +420,6 @@ class Network(L.LightningModule):
         """
         # Get unnormalized army counts from the first channel of observation (first element only)
         army_counts = obs[0, 0, :, :]
-        foreign_army_counts = torch.max(obs[0, 3, :, :], obs[0, 2, :, :])
         
         # Prepare mask and get logits (use only first element)
         processed_obs = self.normalize_observations(obs.clone())
@@ -471,10 +478,13 @@ class Network(L.LightningModule):
                 dest_i, dest_j = i + di, j + dj
                 
                 # Get destination army count
-                dest_count = foreign_army_counts[dest_i, dest_j].item()
+                dest_count_neutral = obs[0, 3, dest_i, dest_j].item()
+                dest_count_enemy = obs[0, 2, dest_i, dest_j].item()
                 
-                # Only accept if source has at least 2 more armies than destination
-                if source_count - dest_count >= 2:
+                # We accept if the destination has neutral armies or
+                # if the destination has enemy armies and the source has at least 2 more armies than the destination
+                # and the destination has more than 5 enemy armies
+                if dest_count_neutral > 0 or (dest_count_enemy > 10 and source_count - dest_count_enemy >= 2):
                     valid_action_found = True
             
             if valid_action_found:
