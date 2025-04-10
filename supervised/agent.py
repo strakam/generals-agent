@@ -10,7 +10,7 @@ from functools import wraps
 from selfplay.network import Network
 
 GRID_SIZE = 24
-DEFAULT_HISTORY_SIZE = 5
+DEFAULT_HISTORY_SIZE = 7
 DEFAULT_BATCH_SIZE = 1
 
 
@@ -200,8 +200,8 @@ class NeuroAgent(Agent):
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
                 obs[:, opponent_army_count, :, :] * ones,
-                # self.last_enemy_army_seen_timestep,
-                # self.last_enemy_army_seen_value,
+                self.last_enemy_army_seen_timestep,
+                self.last_enemy_army_seen_value,
             ],
             dim=1,
         )
