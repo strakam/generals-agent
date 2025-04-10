@@ -76,8 +76,6 @@ class Network(L.LightningModule):
         self.register_buffer("mountains", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("seen", torch.zeros(shape, dtype=torch.bool, device=device))
         self.register_buffer("enemy_seen", torch.zeros(shape, dtype=torch.bool, device=device))
-        self.register_buffer("vertical_flipped", torch.zeros(self.batch_size, dtype=torch.bool, device=device))
-        self.register_buffer("horizontal_flipped", torch.zeros(self.batch_size, dtype=torch.bool, device=device))
 
         if device.type == "cuda":
             torch.cuda.synchronize()  # Ensure buffers are fully initialized on GPU
@@ -96,27 +94,9 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
-            "vertical_flipped",
-            "horizontal_flipped",
-        ]
 
         for attr in attributes_to_reset:
             getattr(self, attr)[timestep_mask] = 0
-
-    def flip_observation(self, obs: torch.Tensor) -> torch.Tensor:
-        """
-        First check in which quadrant is our general. Flip it so it is always bottom left.
-        """
-        general_squares = (obs[:, 1, :, :] * obs[:, 5, :, :]) > 0
-        # Check that each sample in the batch has exactly one general
-        n_generals = general_squares.sum(dim=(1, 2))
-        if n_generals == 1:
-            general_location = torch.argwhere(general_squares)
-            if general_location[0] < 12:
-                self.vertical_flipped = ~self.vertical_flipped
-            if general_location[1] < 12:
-                self.horizontal_flipped = ~self.horizontal_flipped
-        return obs
 
     @torch.compile(dynamic=False, fullgraph=True)
     def augment_observation(self, obs: torch.Tensor) -> torch.Tensor:
@@ -141,7 +121,7 @@ class Network(L.LightningModule):
         priority = 14
 
         self.reset_histories(obs)
-        # obs = self.flip_observation(obs)
+
         # Calculate current army states
         current_army = obs[:, armies, :, :] * obs[:, owned_cells, :, :]
         current_enemy_army = obs[:, armies, :, :] * obs[:, opponent_cells, :, :]

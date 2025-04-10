@@ -16,6 +16,7 @@ from model_utils import print_parameter_breakdown
 torch.set_float32_matmul_precision("high")
 
 
+
 @dataclass
 class SelfPlayConfig:
     # Training parameters
@@ -44,6 +45,7 @@ class SelfPlayConfig:
     target_kl: float = 0.025  # Target KL divergence
     temperature: float = 1.0  # Temperature for softmax action selection
     opponent_temperature: float = 1.0
+
     norm_adv: bool = True  # Whether to normalize advantages
     checkpoint_addition_interval: int = 10
     checkpoint_save_interval: int = 4
@@ -52,7 +54,7 @@ class SelfPlayConfig:
 
     # Lightning fabric parameters
     strategy: str = "auto"
-    precision: str = "32-true"
+    precision: str = "bf16-mixed"
     accelerator: str = "auto"
     devices: int = 2
     seed: int = 42
@@ -103,7 +105,7 @@ class SelfPlayTrainer:
         if cfg.checkpoint_path != "":
             self.network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
             # Load the fixed network from the same checkpoint
-            self.fixed_network = load_fabric_checkpoint(cfg.checkpoint_path, cfg.n_envs)
+            self.fixed_network = load_fabric_checkpoint("aggressive.ckpt", cfg.n_envs)
             self.fixed_network.eval()  # Set fixed network to evaluation mode
         else:
             seq = cfg.channel_sequence
@@ -122,14 +124,7 @@ class SelfPlayTrainer:
             self.opponents[i].mark_forward_method("predict")
             self.opponents[i].eval()
 
-        # Print detailed parameter breakdown
-        if self.fabric.is_global_zero:
-            print_parameter_breakdown(self.network)
-
-        self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
-        self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.fixed_network = self.fabric.setup(self.fixed_network)
-
+        self.fixed_network.mark_forward_method("predict")
 
         self.network.reset()
         self.fixed_network.reset()

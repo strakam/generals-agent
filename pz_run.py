@@ -3,6 +3,7 @@ from generals import PettingZooGenerals, GridFactory
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
+from models.snowballer import Network
 import numpy as np
 
 n_envs = 1
@@ -30,6 +31,7 @@ class ShapedRewardFn(RewardFn):
         current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
 
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
+
 
 
 # agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
