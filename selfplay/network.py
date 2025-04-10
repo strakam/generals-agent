@@ -21,14 +21,12 @@ class Network(L.LightningModule):
         compile: bool = False,
         history_size: int = DEFAULT_HISTORY_SIZE,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        temperature: float = 1.0,
     ):
         super().__init__()
         self.lr = lr
         self.n_steps = n_steps
         self.history_size = history_size
         self.batch_size = batch_size
-        self.temperature = temperature
         self.n_channels = 23 + 2 * self.history_size
 
         self.backbone = Pyramid(self.n_channels, repeats, channel_sequence)
@@ -169,7 +167,7 @@ class Network(L.LightningModule):
                 obs[:, structures_in_fog, :, :],
                 obs[:, timestep, :, :] * ones,
                 (obs[:, timestep, :, :] % 50) * ones / 50,
-                obs[:, priority, :, :] * ones * 0, # priority no longer exists
+                obs[:, priority, :, :] * ones,
                 obs[:, owned_land_count, :, :] * ones,
                 obs[:, owned_army_count, :, :] * ones,
                 obs[:, opponent_land_count, :, :] * ones,
@@ -179,7 +177,7 @@ class Network(L.LightningModule):
             ],
             dim=1,
         )
-        army_stacks = torch.cat([self.army_stack * 0, self.enemy_stack], dim=1) # remove my stack - dont condition on previous moves
+        army_stacks = torch.cat([self.army_stack, self.enemy_stack], dim=1)
         augmented_obs = torch.cat([channels, army_stacks], dim=1).float()
         return augmented_obs
 
@@ -213,90 +211,66 @@ class Network(L.LightningModule):
         # The last channel is for PASS
         full_mask = mask[:, :4, :, :]  # First 4 channels (UP, DOWN, LEFT, RIGHT)
         half_mask = mask[:, :4, :, :]  # Duplicate for half-army moves
-        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
+        zero_layer = torch.ones(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
 
         direction_mask = torch.cat((full_mask, half_mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
 
         return direction_mask
 
-    def augment_representation(self, obs):
-        # Apply random rotation (0, 90, 180, or 270 degrees)
-        if torch.rand(1).item() > 0.5:
-            k = torch.randint(0, 4, (1,)).item()  # Random rotation 0-3 times (90 degrees each)
-            obs = torch.rot90(obs, k, dims=[2, 3])
-
-        # Apply random horizontal flip
-        if torch.rand(1).item() > 0.5:
-            obs = torch.flip(obs, dims=[3])
-
-        # Apply random vertical flip
-        if torch.rand(1).item() > 0.5:
-            obs = torch.flip(obs, dims=[2])
-
-        return obs
-
-    def forward(self, obs, mask, action=None, args=None):
+    def forward(self, obs, mask, action=None):
         obs = self.normalize_observations(obs.float())
         mask = self.prepare_masks(mask.float())
 
         # Use no_grad for backbone computation since it's frozen
-        representation = self.backbone(obs)
+        with torch.no_grad():
+            representation = self.backbone(obs)
 
-        representation_for_value = self.augment_representation(representation)
-
-        value = self.value_head(representation_for_value).flatten()
+        value = self.value_head(representation).flatten()
         action_logits = self.policy_head(representation) + mask
 
         # Prepare flattened logits for categorical distribution
         action_logits_flat = action_logits.view(action_logits.shape[0], 9, -1)
         combined_logits = action_logits_flat.reshape(action_logits.shape[0], -1)
-        # Apply temperature scaling to logits before creating distribution
-        # Scale logits by inverse temperature
-        temperature = args.temperature if args else self.temperature
-        combined_logits = combined_logits / temperature
         action_dist = torch.distributions.Categorical(logits=combined_logits)
-
+        
         if action is None:
             # Sample action
             combined_idx = action_dist.sample()
-
+            
             # Convert combined index to action components
             direction = combined_idx // (24 * 24)
             position = combined_idx % (24 * 24)
             i, j = position // 24, position % 24
-
+            
             # Determine action type
             is_half_army = (direction >= 4) & (direction < 8)
             is_pass = direction == 8
-
+            
             # Create standardized action format
-            final_direction = torch.where(
-                is_pass, torch.full_like(direction, 8), torch.where(is_half_army, direction - 4, direction)
-            )
-
+            final_direction = torch.where(is_pass, 
+                                         torch.full_like(direction, 8), 
+                                         torch.where(is_half_army, direction - 4, direction))
+            
             # Create action tensor: [is_pass, i, j, direction, is_half_army]
-            action = torch.stack(
-                [
-                    is_pass.float(),  # Directly use is_pass instead of zeros + update
-                    i.float(),
-                    j.float(),
-                    final_direction.float(),
-                    is_half_army.float(),
-                ],
-                dim=1,
-            )
+            action = torch.stack([
+                is_pass.float(),  # Directly use is_pass instead of zeros + update
+                i.float(), 
+                j.float(), 
+                final_direction.float(), 
+                is_half_army.float()
+            ], dim=1)
         else:
             # Calculate combined index from existing action
             target_i, target_j = action[:, 1], action[:, 2]
             target_direction, is_half_army = action[:, 3], action[:, 4]
-
-            adjusted_direction = torch.where(
-                target_direction < 4, target_direction + 4 * is_half_army, torch.full_like(target_direction, 8)
-            )
-
+            
+            adjusted_direction = torch.where(target_direction < 4,
+                                            target_direction + 4 * is_half_army,
+                                            torch.full_like(target_direction, 8))
+            
             combined_idx = adjusted_direction * 24 * 24 + target_i * 24 + target_j
-
+        
         # Calculate log probability and entropy
         logprob = action_dist.log_prob(combined_idx)
         entropy = action_dist.entropy()
@@ -349,7 +323,7 @@ class Network(L.LightningModule):
         valid_mask = valid_mask * (1 - num_owned_generals)
 
         # Compute network outputs
-        _, newvalues, newlogprobs, entropy = self(obs, masks, actions, args)
+        _, newvalues, newlogprobs, entropy = self(obs, masks, actions)
 
         # Zero out the loss components of invalid samples so they have no effect.
         advantages = advantages * valid_mask
@@ -362,7 +336,9 @@ class Network(L.LightningModule):
 
         return loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs
 
-    def predict(self, obs, mask):
+    def predict(self, obs, mask, postprocess=False):
+        if postprocess:
+            return self.postprocess_action(obs, mask)
         obs = self.normalize_observations(obs)
         direction_mask = self.prepare_masks(mask)
 
@@ -407,22 +383,151 @@ class Network(L.LightningModule):
 
         return action, value
 
+    def postprocess_action(self, obs, mask, top_k=15):
+        """
+        Post-process model prediction by choosing among top-k actions based on army counts.
+        Only selects actions where the source cell has at least 2 more armies than the destination.
+        Processes only the first element (index 0) for single instance inference.
+        
+        Args:
+            obs: Raw unnormalized observation
+            mask: Action mask
+            top_k: Number of top actions to consider
+            
+        Returns:
+            Selected action and value
+        """
+        # Get unnormalized army counts from the first channel of observation (first element only)
+        army_counts = obs[0, 0, :, :]
+        foreign_army_counts = torch.max(obs[0, 3, :, :], obs[0, 2, :, :])
+        
+        # Prepare mask and get logits (use only first element)
+        processed_obs = self.normalize_observations(obs.clone())
+        direction_mask = self.prepare_masks(mask)
+        
+        x = self.backbone(processed_obs)
+        value = self.value_head(x)[0]  # Get value for first element only
+        logits = self.policy_head(x) + direction_mask
+        
+        # Convert to flat format for first element only
+        logits_flat = logits[0].view(9, -1)
+        combined_logits = logits_flat.reshape(-1)
+        
+        # Get top-k actions
+        topk_values, topk_indices = torch.topk(combined_logits, k=top_k, dim=0)
+        
+        # Direction mapping: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT
+        # Row changes: [-1, 1, 0, 0]
+        # Column changes: [0, 0, -1, 1]
+        dir_to_offset = torch.tensor([
+            [-1, 0],  # UP
+            [1, 0],   # DOWN
+            [0, -1],  # LEFT
+            [0, 1],   # RIGHT
+        ], device=obs.device)
+        
+        valid_action_found = False
+        
+        # Try each action in order of priority
+        for idx in topk_indices:
+            # Extract direction and position
+            adjusted_direction = idx.item() // (24 * 24)
+            position = idx.item() % (24 * 24)
+            i, j = position // 24, position % 24
+            
+            # If it's a pass action, accept it immediately
+            if adjusted_direction == 8:
+                is_pass = True
+                is_half_army = False
+                final_direction = 8
+                valid_action_found = True
+            else:
+                is_pass = False
+                is_half_army = (adjusted_direction >= 4) and (adjusted_direction < 8)
+                final_direction = adjusted_direction - 4 if is_half_army else adjusted_direction
+                
+                # Skip if final_direction is out of bounds
+                if final_direction >= 4:
+                    continue
+                
+                # Get source army count
+                source_count = army_counts[i, j].item()
+                
+                # Calculate destination coordinates
+                di, dj = dir_to_offset[final_direction]
+                dest_i, dest_j = i + di, j + dj
+                
+                # Get destination army count
+                dest_count = foreign_army_counts[dest_i, dest_j].item()
+                
+                # Only accept if source has at least 2 more armies than destination
+                if source_count - dest_count >= 2:
+                    valid_action_found = True
+            
+            if valid_action_found:
+                # Create action tensor: [is_pass, i, j, direction, is_half_army]
+                action = torch.tensor([
+                    float(is_pass),
+                    float(i),
+                    float(j),
+                    float(final_direction),
+                    float(is_half_army)
+                ], device=obs.device)
+                break
+        
+        # If no valid action found, just use the top action
+        if not valid_action_found:
+            idx = topk_indices[0].item()
+            adjusted_direction = idx // (24 * 24)
+            position = idx % (24 * 24)
+            i, j = position // 24, position % 24
+            
+            is_half_army = (adjusted_direction >= 4) and (adjusted_direction < 8)
+            is_pass = adjusted_direction == 8
+            
+            final_direction = 8 if is_pass else (adjusted_direction - 4 if is_half_army else adjusted_direction)
+            
+            action = torch.tensor([
+                float(is_pass),
+                float(i),
+                float(j),
+                float(final_direction),
+                float(is_half_army)
+            ], device=obs.device)
+        
+        # Add batch dimension of 1 to match expected output format
+        action = action.unsqueeze(0)
+        value = value.unsqueeze(0)
+        
+        return action, value
+
+    def pure_forward(self, obs, mask):
+        obs = self.normalize_observations(obs)
+        mask = self.prepare_masks(mask)
+
+        # Use no_grad for backbone computation since it's frozen
+        with torch.no_grad():
+            representation = self.backbone(obs)
+
+        value = self.value_head(representation).flatten()
+        action_logits = self.policy_head(representation) + mask
+
+        return action_logits, value
+
     def configure_optimizers(self, lr: float = None, n_steps: int = None):
         lr = lr or self.lr
         n_steps = n_steps or self.n_steps
 
-        # # Freeze the backbone
+        # # # Freeze the backbone
         # for param in self.backbone.parameters():
-        #    param.requires_grad = False
+        #     param.requires_grad = False
 
         # # Only optimize the heads
         # trainable_params = []
         # trainable_params.extend(self.policy_head.parameters())
         # trainable_params.extend(self.value_head.parameters())
 
-        optimizer = torch.optim.AdamW(
-            self.parameters(), lr=lr, amsgrad=True, eps=1e-08, weight_decay=0.01, betas=(0.9, 0.999)
-        )
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, amsgrad=True, eps=1e-07, weight_decay=0.15)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
         return optimizer, scheduler
 
