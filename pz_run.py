@@ -1,4 +1,4 @@
-from supervised.agent import load_agent, load_fabric_checkpoint
+from supervised.agent import load_fabric_checkpoint
 from generals import PettingZooGenerals, GridFactory
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
@@ -33,10 +33,14 @@ class ShapedRewardFn(RewardFn):
         return float(original_reward + self.shaping_weight * (current_ratio_reward - prev_ratio_reward))
 
 
-agent1 = Network.load_from_checkpoint(batch_size=1)
-agent2 = load_fabric_checkpoint("checkpoints/experiments/back20.ckpt", mode="online")
 
-agent_names = ["snowb", "back20"]
+# agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
+# agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
+agent1 = load_fabric_checkpoint("checkpoints/experiments/zero3.ckpt", mode="online")
+agent2 = load_fabric_checkpoint("checkpoints/experiments/zero3.ckpt", mode="online")
+# agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
+
+agent_names = ["zero3", "zeroo3"]
 agents = {agent_names[0]: agent1, agent_names[1]: agent2}
 
 # Create environment

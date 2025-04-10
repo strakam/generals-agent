@@ -94,7 +94,6 @@ class Network(L.LightningModule):
             "cities",
             "generals",
             "mountains",
-        ]
 
         for attr in attributes_to_reset:
             getattr(self, attr)[timestep_mask] = 0

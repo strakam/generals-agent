@@ -1,5 +1,17 @@
-- discuss reward shaping or curriculum?? so far trying shaping
-- critic sometimes very bad - should I do all-knowing critic?
+
+- shaping vs currciulum - not well explored by me
+- Critic veeery weird
 - argmax vs sampling -- not sure, but argmax seems to work better
 - interleave or simultaneous or independent? 
-- gumbel softmax
+
+
+Next steps:
+1. Larger model, now on larger maps too.
+2. Half army actions
+3/4. RNN vs game theory approach (read FSP,..)
+5. Hyperparams and larger scale training
+
+
+
+- weakness demo: https://generals.io/replays/OHj_Y5GgK?p=Pep+Guardiola (memory)
+- fun nice behavior: https://generals.io/replays/Xi798NT7y?p=Average+Joe

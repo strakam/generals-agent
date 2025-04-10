@@ -5,11 +5,9 @@ import os
 def clean_checkpoint(checkpoint_path: str, output_path: str):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     keys = list(checkpoint.keys())
-
+    print(keys)
     if "state_dict" in keys:
         checkpoint["model"] = checkpoint["state_dict"]
-        del checkpoint["state_dict"]
-
     # Remove all keys except for "model"
     for key in keys:
         if key != "model":

@@ -29,25 +29,18 @@ class Network(L.LightningModule):
             nn.Linear(h * w, 1),
         )
 
-        self.square_head = nn.Sequential(
-            Pyramid(final_channels, [1], [final_channels]),
-            nn.Conv2d(final_channels, 1, kernel_size=3, padding=1),
+        self.policy_head = nn.Sequential(
+            Pyramid(final_channels, [2], [final_channels]),
+            nn.Conv2d(final_channels, 9, kernel_size=3, padding=1),
         )
 
-        self.direction_head = nn.Sequential(
-            Pyramid(final_channels + 1, [1], [final_channels]),
-            nn.Conv2d(final_channels, 5, kernel_size=3, padding=1),
-        )
-
-        self.square_loss = nn.CrossEntropyLoss()
-        self.direction_loss = nn.CrossEntropyLoss()
+        self.action_loss = nn.CrossEntropyLoss()
         self.value_loss = nn.MSELoss()
 
         if compile:
             self.backbone = torch.compile(self.backbone)
             self.value_head = torch.compile(self.value_head)
-            self.square_head = torch.compile(self.square_head)
-            self.direction_head = torch.compile(self.direction_head)
+            self.policy_head = torch.compile(self.policy_head)
 
     @torch.compile
     def normalize_observations(self, obs):
@@ -66,81 +59,123 @@ class Network(L.LightningModule):
         return obs
 
     @torch.compile
-    def prepare_masks(self, obs, direction_mask):
-        square_mask = (1 - obs[:, 10, :, :].unsqueeze(1)) * -1e9
+    def prepare_masks(self, direction_mask):
         direction_mask = 1 - direction_mask.permute(0, 3, 1, 2)
         pad_h = 24 - direction_mask.shape[2]
         pad_w = 24 - direction_mask.shape[3]
         mask = F.pad(direction_mask, (0, pad_w, 0, pad_h), mode="constant", value=1)
-        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)
-        direction_mask = torch.cat((mask, zero_layer), dim=1)
+
+        # We now need to extend the direction mask for 9 directions (4 full army, 4 half army, 1 pass)
+        # Duplicate the first 4 channels (UP, DOWN, LEFT, RIGHT) for half-army moves
+        # The last channel is for PASS
+        full_mask = mask[:, :4, :, :]  # First 4 channels (UP, DOWN, LEFT, RIGHT)
+        half_mask = mask[:, :4, :, :]  # Duplicate for half-army moves
+        zero_layer = torch.zeros(mask.shape[0], 1, 24, 24).to(self.device)  # PASS layer
+
+        direction_mask = torch.cat((full_mask, half_mask, zero_layer), dim=1)
         direction_mask = direction_mask * -1e9
 
-        return square_mask, direction_mask
+        return direction_mask
 
-    def forward(self, obs, mask, teacher_cells=None):
+    def forward(self, obs, mask):
         obs = self.normalize_observations(obs)
         x = self.backbone(obs)
         value = self.value_head(x)
 
-        square_mask, direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(x)
-        square_logits = (square_logits + square_mask).flatten(1)
+        direction_mask = self.prepare_masks(mask)
 
-        if teacher_cells is not None:
-            square = teacher_cells
-        else:
-            square = torch.argmax(square_logits, dim=1).int()
-        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((x, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
+        # representation_with_square = torch.cat((x, square_reshaped), dim=1)
+        direction = self.policy_head(x)
         direction = direction + direction_mask
 
-        i, j = square // 24, square % 24
-        direction = direction[torch.arange(direction.shape[0]), :, i, j]
-        return square_logits, direction, value
+        # Create combined logits for square+direction combinations
+        # Reshape direction to [batch, 9, 24*24]
+        direction_flat = direction.view(direction.shape[0], 9, -1)
+
+        # Create a tensor of shape [batch, 9*24*24] containing all possible square+direction combinations
+        combined_logits = direction_flat.reshape(direction.shape[0], -1)
+
+        return combined_logits, value
 
     def training_step(self, batch, batch_idx):
         obs, mask, values, actions = batch
         target_i = actions[:, 1]
         target_j = actions[:, 2]
-        target_cell = target_i * 24 + target_j
+        target_direction = actions[:, 3]
+        is_half_army = actions[:, 4]
 
-        square_logits, direction, values_pred = self(obs, mask, target_cell)
+        # For half-army moves, add 4 to the direction (0-3 becomes 4-7)
+        # Direction 4 (pass) stays as 8
+        adjusted_direction = torch.where(
+            target_direction < 4,  # For UP, DOWN, LEFT, RIGHT
+            target_direction + 4 * is_half_army,  # Add 4 if half army
+            torch.full_like(target_direction, 8),  # PASS becomes 8
+        )
 
-        square_loss = self.square_loss(square_logits, target_cell.long())
-        direction_loss = self.direction_loss(direction, actions[:, 3])
-        value_loss = self.value_loss(values_pred.flatten(), values)
+        # Calculate the target index in the combined logits
+        # Combined index = (direction * 24 * 24) + (i * 24) + j
+        target_combined = adjusted_direction * 24 * 24 + target_i * 24 + target_j
 
-        loss = square_loss + direction_loss + value_loss
+        # Forward pass
+        combined_logits, value_pred = self(obs, mask)
+
+        # Calculate loss using cross-entropy on the combined logits
+        combined_loss = F.cross_entropy(combined_logits, target_combined.long())
+        value_loss = self.value_loss(value_pred.flatten(), values)
+
+        # Total loss
+        loss = combined_loss + value_loss
+
+        # Logging
         self.log("value_loss", value_loss, on_step=True, prog_bar=True)
-        self.log("square_loss", square_loss, on_step=True, prog_bar=True)
-        self.log("dir_loss", direction_loss, on_step=True, prog_bar=True)
+        self.log("combined_loss", combined_loss, on_step=True, prog_bar=True)
         self.log("loss", loss, on_step=True, prog_bar=True)
         return loss
 
     def predict(self, obs, mask):
         obs = self.normalize_observations(obs)
+        direction_mask = self.prepare_masks(mask)
+
         x = self.backbone(obs)
         value = self.value_head(x)
 
-        square_mask, direction_mask = self.prepare_masks(obs, mask)
-        square_logits = self.square_head(x)
-        square_logits = (square_logits + square_mask).flatten(1)
-        square = torch.argmax(square_logits, dim=1).int()
-        square_reshaped = F.one_hot(square.long(), num_classes=24 * 24).float().reshape(-1, 1, 24, 24)
-        representation_with_square = torch.cat((x, square_reshaped), dim=1)
-        direction = self.direction_head(representation_with_square)
-        direction = direction + direction_mask
-        i, j = square // 24, square % 24
-        direction = direction[torch.arange(direction.shape[0]), :, i, j]
+        direction = self.policy_head(x) + direction_mask
 
-        direction = direction.argmax(dim=1)
+        # Reshape direction to [batch, 9, 24*24]
+        direction_flat = direction.view(direction.shape[0], 9, -1)
+
+        # Create a tensor of shape [batch, 9*24*24] containing all possible square+direction combinations
+        combined_logits = direction_flat.reshape(direction.shape[0], -1)
+
+        # Get the argmax index from combined logits
+        combined_idx = torch.argmax(combined_logits, dim=1)
+
+        # Extract direction and position from combined index
+        # combined_idx = (direction * 24 * 24) + (i * 24) + j
+        adjusted_direction = combined_idx // (24 * 24)  # Integer division to get direction
+        position = combined_idx % (24 * 24)  # Remainder gives position
+        i, j = position // 24, position % 24
+        print("hi")
+
+        # Determine if it's a half-army move and the direction
+        is_half_army = (adjusted_direction >= 4) & (adjusted_direction < 8)
+        is_pass = adjusted_direction == 8
+
+        # Convert back to the original direction format (0-3 for directions, 4 for pass)
+        final_direction = torch.where(
+            is_pass,
+            torch.full_like(adjusted_direction, 8),  # Pass is direction 4
+            torch.where(
+                is_half_army,
+                adjusted_direction - 4,  # Half army directions (4-7) -> (0-3)
+                adjusted_direction,  # Full army directions (0-3) stay the same
+            ),
+        )
 
         # Create action tensor with shape [batch_size, 5]
-        zeros = torch.zeros_like(square, dtype=torch.float)
-        action = torch.stack([zeros, i, j, direction, zeros], dim=1)
-        action[action[:, 3] == 4, 0] = 1  # pass action
+        zeros = torch.zeros_like(i, dtype=torch.float)
+        action = torch.stack([zeros, i, j, final_direction, is_half_army.long()], dim=1)
+        action[action[:, 3] == 8, 0] = 1  # pass action
 
         return action, value
 
@@ -161,8 +196,7 @@ class Network(L.LightningModule):
         high_level_modules = {
             "backbone": self.backbone,
             "value_head": self.value_head,
-            "square_head": self.square_head,
-            "direction_head": self.direction_head,
+            "policy_head": self.policy_head,
         }
 
         for name, module in high_level_modules.items():

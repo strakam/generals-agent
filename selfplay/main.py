@@ -1,87 +1,56 @@
+import time
 import numpy as np
 import torch
 from dataclasses import dataclass, field
 from typing import List, Tuple
 import gymnasium as gym
-import argparse
-import neptune
 from lightning.fabric import Fabric
 from tqdm import tqdm
-import os
 
 from generals import GridFactory, GymnasiumGenerals
-from generals.core.rewards import RewardFn, compute_num_generals_owned
-from generals.core.observation import Observation
-from generals.core.action import Action
 from network import Network, load_fabric_checkpoint
-from model_utils import check_and_save_checkpoints, print_parameter_breakdown
+from rewards import CompositeRewardFn
+from logger import NeptuneLogger
+from model_utils import print_parameter_breakdown
 
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")
 
-
-class ShapedRewardFn(RewardFn):
-    """A reward function that shapes the reward based on the number of generals owned."""
-
-    def __init__(self, clip_value: float = 1.5, shaping_weight: float = 0.5):
-        self.maximum_ratio = clip_value
-        self.shaping_weight = shaping_weight
-
-    def calculate_ratio_reward(self, my_count: int, opponent_count: int, max_ratio: float = 1.5) -> float:
-        ratio = my_count / opponent_count
-        ratio = np.log(ratio) / np.log(max_ratio)
-        return np.minimum(np.maximum(ratio, -1.0), 1.0)
-
-    def __call__(self, prior_obs: Observation, prior_action: Action, obs: Observation) -> float:
-        original_reward = compute_num_generals_owned(obs) - compute_num_generals_owned(prior_obs)
-        # If the game is done, we dont want to shape the reward
-        if obs.owned_army_count == 0 or obs.opponent_army_count == 0:
-            return original_reward
-
-        prev_ratio_reward = self.calculate_ratio_reward(prior_obs.owned_army_count, prior_obs.opponent_army_count)
-        current_ratio_reward = self.calculate_ratio_reward(obs.owned_army_count, obs.opponent_army_count)
-
-        ratio_reward = current_ratio_reward - prev_ratio_reward
-
-        prev_land_ratio_reward = self.calculate_ratio_reward(
-            prior_obs.owned_land_count, prior_obs.opponent_land_count, max_ratio=1.25
-        )
-        current_land_ratio_reward = self.calculate_ratio_reward(
-            obs.owned_land_count, obs.opponent_land_count, max_ratio=1.25
-        )
-
-        land_ratio_reward = current_land_ratio_reward - prev_land_ratio_reward
-
-        return float(original_reward + self.shaping_weight * (ratio_reward + land_ratio_reward))
 
 
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 352
-    n_steps: int = 2600
-    batch_size: int = 880
-    n_epochs: int = 4
-    truncation: int = 1000
+    n_envs: int = 198
+    n_steps: int = 6000
+    batch_size: int = 1500
+    n_epochs: int = 3
+    truncation: int = 800
     grid_size: int = 23
-    channel_sequence: List[int] = field(default_factory=lambda: [192, 224, 256, 256])
-    repeats: List[int] = field(default_factory=lambda: [2, 2, 1, 1])
-    checkpoint_path: str = "aggro45.ckpt"
-    checkpoint_dir: str = "/root/aggro/"
-
-    store_checkpoint_thresholds: List[float] = field(default_factory=lambda: [0.42, 0.43, 0.44, 0.45])
-    update_fixed_network_threshold: float = 0.45
+    channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
+    repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
+    checkpoint_path: str = "special.ckpt"
+    # checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
+    checkpoint_dir: str = "/root/ft_special/"
+    neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
-    gae_lambda: float = 0.92  # GAE lambda parameter
+    gae_lambda: float = 0.95  # GAE lambda parameter
     learning_rate: float = 1e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
-    clip_coef: float = 0.2  # PPO clipping coefficient
-    ent_coef: float = 0.001  # Increased from 0.00 to encourage exploration
-    vf_coef: float = 0.5  # Value function coefficient
-    target_kl: float = 0.02  # Target KL divergence
+    clip_coef: float = 0.15  # PPO clipping coefficient
+    ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
+    vf_coef: float = 0.3  # Value function coefficient
+    target_kl: float = 0.025  # Target KL divergence
+    temperature: float = 1.0  # Temperature for softmax action selection
+    opponent_temperature: float = 1.0
+
     norm_adv: bool = True  # Whether to normalize advantages
+    checkpoint_addition_interval: int = 10
+    checkpoint_save_interval: int = 4
+    winrate_threshold: float = 0.45
+    max_n_opponents: int = 4
 
     # Lightning fabric parameters
     strategy: str = "auto"
@@ -91,72 +60,22 @@ class SelfPlayConfig:
     seed: int = 42
 
 
-class NeptuneLogger:
-    """Handles logging experiment metrics to Neptune."""
-
-    def __init__(self, config: SelfPlayConfig, fabric: Fabric):
-        self.fabric = fabric
-        # Only initialize Neptune on the main process
-        if self.fabric.is_global_zero:
-            self.run = neptune.init_run(
-                project="strakam/selfplay",
-                name="generals-selfplay",
-                tags=["selfplay", "training"],
-            )
-        self.config = config
-        self._log_config()
-
-    def _log_config(self):
-        """Log experiment configuration parameters."""
-        if self.fabric.is_global_zero:
-            self.run["parameters"] = {
-                # Training hyperparameters
-                "training_iterations": self.config.training_iterations,
-                "n_steps": self.config.n_steps,
-                "n_epochs": self.config.n_epochs,
-                "batch_size": self.config.batch_size,
-                "n_envs": self.config.n_envs,
-                # Environment settings
-                "truncation": self.config.truncation,
-                # PPO hyperparameters
-                "learning_rate": self.config.learning_rate,
-                "gamma": self.config.gamma,
-                "clip_coef": self.config.clip_coef,
-                "ent_coef": self.config.ent_coef,
-                "max_grad_norm": self.config.max_grad_norm,
-                # Infrastructure settings
-                "checkpoint_path": self.config.checkpoint_path,
-                "strategy": self.config.strategy,
-                "accelerator": self.config.accelerator,
-                "precision": self.config.precision,
-                "devices": self.config.devices,
-            }
-
-    def log_metrics(self, metrics: dict):
-        """Logs a batch of metrics to Neptune."""
-        if self.fabric.is_global_zero:
-            for key, value in metrics.items():
-                self.run[f"{key}"].log(value)
-
-    def close(self):
-        """Close the Neptune run."""
-        if self.fabric.is_global_zero:
-            self.run.stop()
-
-
 def create_environment(agent_names: List[str], cfg: SelfPlayConfig) -> gym.vector.AsyncVectorEnv:
-    grid_factory = GridFactory(mode="generalsio")
-    return gym.vector.AsyncVectorEnv(
-        [
+    # Create environments with different min_generals_distance values
+    envs = []
+    for i in range(cfg.n_envs):
+        envs.append(
             lambda: GymnasiumGenerals(
                 agents=agent_names,
-                grid_factory=grid_factory,
+                grid_factory=GridFactory(mode="generalsio"),
                 truncation=cfg.truncation,
                 pad_observations_to=24,
-                reward_fn=ShapedRewardFn(),
+                reward_fn=CompositeRewardFn(),
             )
-            for _ in range(cfg.n_envs)
-        ],
+        )
+
+    return gym.vector.AsyncVectorEnv(
+        envs,
         shared_memory=True,
     )
 
@@ -194,13 +113,16 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        # Print detailed parameter breakdown
-        if self.fabric.is_global_zero:
-            print_parameter_breakdown(self.network)
-
-        self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
-        self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.fixed_network = self.fabric.setup(self.fixed_network)
+        opponent_names = ["special", "cp_10", "zero3"]
+        self.opponents = [
+            load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
+        ]
+        # Set up opponents with Fabric and set to evaluation mode
+        for i in range(len(self.opponents)):
+            self.opponents[i] = self.fabric.setup(self.opponents[i])
+            self.opponents[i].temperature = self.cfg.opponent_temperature
+            self.opponents[i].mark_forward_method("predict")
+            self.opponents[i].eval()
 
         self.fixed_network.mark_forward_method("predict")
 
@@ -275,7 +197,7 @@ class SelfPlayTrainer:
                 sampler.set_epoch(epoch)
 
             pbar = tqdm(batch_sampler, desc=f"Epoch {epoch}/{self.cfg.n_epochs}")
-
+            entropies = []
             for batch_idx, batch_indices in enumerate(pbar):
                 # Convert indices list to tensor for indexing
                 batch_indices_tensor = torch.tensor(batch_indices, device=fabric.device)
@@ -285,7 +207,7 @@ class SelfPlayTrainer:
                 loss, pg_loss, value_loss, entropy_loss, ratio, newlogprobs = self.network.training_step(
                     batch, self.cfg
                 )
-
+                entropies.append(entropy_loss.mean().item())
                 # Compute approximate KL divergence as the mean value of (ratio - 1 - log(ratio))
                 with torch.no_grad():
                     logratio = torch.log(ratio)
@@ -336,8 +258,13 @@ class SelfPlayTrainer:
                     }
                 )
 
-            if approx_kl > self.cfg.target_kl:
-                break
+            if np.mean(entropies) > 1.2:
+                self.cfg.ent_coef = 0.000
+            elif np.mean(entropies) < 0.9:
+                self.cfg.ent_coef = 0.001
+
+        self.cfg.temperature = max(0.8, self.cfg.temperature - 0.04)
+        self.fabric.print(f"New temperature: {self.cfg.temperature}")
 
     def process_observations(self, obs: np.ndarray, infos: dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Processes raw observations from the environment.
@@ -348,10 +275,11 @@ class SelfPlayTrainer:
             rewards: (n_envs, n_agents)
         """
         with self.fabric.device:
-            # Process observations - only for player 1
+            # Process observations
             self.obs_buffer.copy_(torch.from_numpy(obs))
             self.obs_buffer = self.obs_buffer.to(self.fabric.device, non_blocking=True)
 
+            # Create augmented observations for both players
             augmented_obs = torch.stack(
                 [
                     self.network.augment_observation(self.obs_buffer[:, 0, ...]),
@@ -385,10 +313,22 @@ class SelfPlayTrainer:
         prev_obs = next_obs
         next_obs, mask, _ = self.process_observations(next_obs, infos)
         next_done = torch.zeros(self.cfg.n_envs, dtype=torch.bool, device=self.fabric.device)
+
+        import random
+
+        self.last_update_iteration = -1
+
+        self.opponent = self.fixed_network
+        last_opponent = 0
         for iteration in range(1, self.cfg.training_iterations + 1):
             wins, draws, losses, avg_game_length = 0, 0, 0, 0
+            start_time = time.time()
+            for step in range(self.cfg.n_steps):
+                if step % 1000 == 0:
+                    # Sample a random opponent from self.opponents every 2000 steps
+                    last_opponent = (last_opponent + 1) % len(self.opponents)
+                    self.opponent = self.opponents[last_opponent]
 
-            for step in range(0, self.cfg.n_steps):
                 self.obs[step] = next_obs[:, 0]  # Store player 1's observation directly
                 self.dones[step] = next_done
                 self.masks[step] = mask[:, 0]  # Only store player 1's mask
@@ -397,7 +337,7 @@ class SelfPlayTrainer:
                     # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
-                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask)
+                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask, args=self.cfg)
                     _actions[:, 0] = player1_actions.cpu().numpy()
 
                     # Store player 1's actions, values, and logprobs
@@ -405,20 +345,18 @@ class SelfPlayTrainer:
                     self.values[step] = player1_value
                     self.logprobs[step] = player1_logprobs
 
-                    # Get actions for player 2 (fixed player) without storing
+                    # Get actions for player 2 (fixed network) without storing
                     player2_obs = next_obs[:, 1]
                     player2_mask = mask[:, 1]
-                    player2_actions, _ = self.fixed_network.predict(player2_obs, player2_mask)
+                    player2_actions, _ = self.opponent.predict(player2_obs, player2_mask)
                     _actions[:, 1] = player2_actions.cpu().numpy()
 
                     # Log metrics for player 1
                     probs = torch.exp(player1_logprobs)
-                    mean_prob = probs.mean().item()
-                    std_prob = probs.std().item()
                     self.logger.log_metrics(
                         {
-                            "step_mean_prob": mean_prob,
-                            "step_std_prob": std_prob,
+                            "step_mean_prob": probs.mean().item(),
+                            "step_std_prob": probs.std().item(),
                         }
                     )
 
@@ -480,28 +418,6 @@ class SelfPlayTrainer:
                 draw_rate = draws / total_games
                 loss_rate = losses / total_games
                 avg_game_length = avg_game_length / total_games  # Calculate average game length
-
-                # Check if we should save a checkpoint based on win rate thresholds
-                newly_saved_thresholds = check_and_save_checkpoints(
-                    self.fabric,
-                    self.network,
-                    self.optimizer,
-                    self.cfg.checkpoint_dir,
-                    self.cfg.store_checkpoint_thresholds,
-                    self.saved_thresholds,
-                    win_rate,
-                    iteration,
-                )
-                self.saved_thresholds.update(newly_saved_thresholds)
-
-                # If win rate exceeds threshold, update fixed network to current network
-                if win_rate >= self.cfg.update_fixed_network_threshold:
-                    self.fabric.print(
-                        f"Win rate {win_rate:.2%} exceeded threshold {self.cfg.update_fixed_network_threshold:.2%}, updating fixed network"
-                    )
-                    self.fixed_network.load_state_dict(self.network.state_dict())
-                    self.self_play_iteration += 1
-
             else:
                 win_rate = draw_rate = loss_rate = avg_game_length = 0.0
 
@@ -512,6 +428,22 @@ class SelfPlayTrainer:
                 f"Total games: {total_games}; "
                 f"Self-play iteration: {self.self_play_iteration}"
             )
+            if self.fabric.is_global_zero:
+                checkpoint_path = f"{self.cfg.checkpoint_dir}cp_{iteration}.ckpt"
+                state = {
+                    "model": self.network,
+                    "optimizer": self.optimizer,
+                }
+                self.fabric.save(checkpoint_path, state)
+                self.fabric.print(f"Saved checkpoint to {checkpoint_path}")
+
+            if win_rate > self.cfg.winrate_threshold and iteration - self.last_update_iteration > 3:
+                self.opponents.append(self.network)
+                self.opponents[-1].eval()
+                self.opponents[-1].temperature = self.cfg.opponent_temperature
+                self.opponents = self.opponents[-self.cfg.max_n_opponents:]
+                self.last_update_iteration = iteration
+                self.fabric.print(f"New opponent added in iteration {iteration}")
 
             self.logger.log_metrics(
                 {
@@ -541,19 +473,25 @@ class SelfPlayTrainer:
                 "logprobs": b_logprobs,
                 "masks": b_masks,
             }
+            gathering_time = time.time() - start_time
+            minutes, seconds = divmod(gathering_time, 60)
+            print(f"Time taken for gathering: {int(minutes)}m {seconds:.2f}s")
 
+            train_start_time = time.time()
             self.train(self.fabric, dataset)
+
+            training_time = time.time() - train_start_time
+            minutes, seconds = divmod(training_time, 60)
+            print(f"Time taken for training: {int(minutes)}m {seconds:.2f}s")
 
         self.logger.close()
 
 
-def main(args):
+def main():
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg)
     trainer.run()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Self-Play Configuration")
-    args = parser.parse_args()
-    main(args)
+    main()
