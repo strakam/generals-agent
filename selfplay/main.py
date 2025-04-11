@@ -21,23 +21,23 @@ torch.set_float32_matmul_precision("high")
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 198
-    n_steps: int = 6000
-    batch_size: int = 1500
+    n_envs: int = 2
+    n_steps: int = 6
+    batch_size: int = 2
     n_epochs: int = 3
     truncation: int = 800
     grid_size: int = 23
     channel_sequence: List[int] = field(default_factory=lambda: [256, 256, 288, 288])
     repeats: List[int] = field(default_factory=lambda: [2, 2, 2, 1])
-    checkpoint_path: str = "special.ckpt"
+    checkpoint_path: str = ""
     # checkpoint_dir: str = "/storage/praha1/home/strakam3/reward/"
-    checkpoint_dir: str = "/root/ft_special/"
+    checkpoint_dir: str = "/root/from_zero/"
     neptune_token_path: str = "neptune_token.txt"
 
     # PPO parameters
     gamma: float = 1.0  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda parameter
-    learning_rate: float = 1e-5  # Standard PPO learning rate
+    learning_rate: float = 5e-5  # Standard PPO learning rate
     max_grad_norm: float = 0.25  # Gradient clipping
     clip_coef: float = 0.15  # PPO clipping coefficient
     ent_coef: float = 0.000  # Increased from 0.00 to encourage exploration
@@ -56,7 +56,7 @@ class SelfPlayConfig:
     strategy: str = "auto"
     precision: str = "bf16-mixed"
     accelerator: str = "auto"
-    devices: int = 2
+    devices: int = 1
     seed: int = 42
 
 
@@ -113,18 +113,23 @@ class SelfPlayTrainer:
             self.fixed_network = Network(batch_size=cfg.n_envs, channel_sequence=seq, repeats=cfg.repeats)
             self.fixed_network.eval()
 
-        opponent_names = ["special", "cp_10", "zero3"]
+        opponent_names = []
         self.opponents = [
             load_fabric_checkpoint(f"{opponent_name}.ckpt", cfg.n_envs) for opponent_name in opponent_names
-        ]
+        ] + [self.fixed_network]
         # Set up opponents with Fabric and set to evaluation mode
         for i in range(len(self.opponents)):
             self.opponents[i] = self.fabric.setup(self.opponents[i])
             self.opponents[i].temperature = self.cfg.opponent_temperature
-            self.opponents[i].mark_forward_method("predict")
             self.opponents[i].eval()
 
-        self.fixed_network.mark_forward_method("predict")
+        # Print detailed parameter breakdown
+        if self.fabric.is_global_zero:
+            print_parameter_breakdown(self.network)
+
+        self.optimizer, _ = self.network.configure_optimizers(lr=cfg.learning_rate)
+        self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
+        self.fixed_network = self.fabric.setup(self.fixed_network)
 
         self.network.reset()
         self.fixed_network.reset()
@@ -337,7 +342,7 @@ class SelfPlayTrainer:
                     # Get actions for player 1 (learning player)
                     player1_obs = next_obs[:, 0]
                     player1_mask = mask[:, 0]
-                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask, args=self.cfg)
+                    player1_actions, player1_value, player1_logprobs, _ = self.network(player1_obs, player1_mask)
                     _actions[:, 0] = player1_actions.cpu().numpy()
 
                     # Store player 1's actions, values, and logprobs
