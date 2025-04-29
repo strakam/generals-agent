@@ -1,9 +1,10 @@
-from supervised.agent import load_agent, load_fabric_checkpoint
+from supervised.agent import load_fabric_checkpoint
 from generals import PettingZooGenerals, GridFactory
 from generals.core.rewards import RewardFn, compute_num_generals_owned
 from generals.core.observation import Observation
 from generals.core.action import Action
 import numpy as np
+from models.snowballer import Network
 
 n_envs = 1
 
@@ -34,12 +35,12 @@ class ShapedRewardFn(RewardFn):
 
 # agent1 = load_fabric_checkpoint("checkpoints/selfplay/against_snowballer.ckpt", mode="online")
 # agent2 = load_fabric_checkpoint("checkpoints/selfplay/snowballer.ckpt", mode="online")
+old = Network.load_from_checkpoint("models/runner.ckpt")
 agent1 = load_fabric_checkpoint("checkpoints/experiments/zero3.ckpt", mode="online")
-agent2 = load_fabric_checkpoint("checkpoints/experiments/rew/cp_12.ckpt", mode="online")
 # agent2 = load_agent("checkpoints/sup335/step=50000.ckpt", mode="online")
 
 agent_names = ["zero3", "rew"]
-agents = {agent_names[0]: agent1, agent_names[1]: agent2}
+agents = {agent_names[0]: agent1, agent_names[1]: old}
 
 # Create environment
 n_games = 250
@@ -52,7 +53,7 @@ for g in range(n_games):
     env = PettingZooGenerals(agents=agent_names, grid_factory=gf, render_mode="human")
     observations, info = env.reset(options={"replay_file": "hehe"})
     agent1.reset()
-    agent2.reset()
+    old.reset()
     while not done:
         actions = {}
         for agent in env.agents:  # go over agent ids

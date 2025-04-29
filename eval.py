@@ -10,13 +10,14 @@ from lightning.fabric import Fabric
 from generals import GridFactory, GymnasiumGenerals
 from selfplay.network import load_fabric_checkpoint
 from selfplay.logger import NeptuneLogger
+from models.snowballer import Network
 torch.set_float32_matmul_precision("medium")
 
 @dataclass
 class SelfPlayConfig:
     # Training parameters
     training_iterations: int = 1000
-    n_envs: int = 256
+    n_envs: int = 4
     n_steps: int = 3
     n_epochs: int = 4
     batch_size: int = 6
@@ -92,6 +93,7 @@ class SelfPlayTrainer:
             agent = self.fabric.setup(agent)
             self.agents[name] = agent
 
+        self.agents["snowballer"] = Network.load_from_checkpoint("models/runner.ckpt")
         # Create environment.
         self.envs = create_environment(cfg)
 
@@ -213,7 +215,7 @@ class SelfPlayTrainer:
 
 
 def main():
-    agent_names = ["anti", "castler2", "zero0", "zero1", "zero2", "zero3", "cp_79"]
+    agent_names = ["supervised_M"]
     cfg = SelfPlayConfig()
     trainer = SelfPlayTrainer(cfg, agent_names)
 
